@@ -23,8 +23,20 @@ proc configured_otp_path {} {
 }
 
 proc read_otp_file {path} {
-    if {[catch {file type $path} file_type] || $file_type ne "file" || ![file readable $path]} {
-        return -code error "FUTU_LOGIN_OTP_FILE must be a regular readable file"
+    if {[catch {file lstat $path stat}]} {
+        return -code error "FUTU_LOGIN_OTP_FILE must be a regular file"
+    }
+    if {$stat(type) ne "file"} {
+        return -code error "FUTU_LOGIN_OTP_FILE must be a regular file"
+    }
+    if {[catch {set current_uid [string trim [exec id -u]]}]} {
+        return -code error "FUTU_LOGIN_OTP_FILE owner could not be determined"
+    }
+    if {$stat(uid) ne $current_uid} {
+        return -code error "FUTU_LOGIN_OTP_FILE must be owned by the current uid"
+    }
+    if {($stat(mode) & 63) != 0 || ($stat(mode) & 256) == 0 || ![file readable $path]} {
+        return -code error "FUTU_LOGIN_OTP_FILE must be owner-readable with no group/other permissions"
     }
     set channel [open $path r]
     set value [string trim [read $channel]]
@@ -33,6 +45,12 @@ proc read_otp_file {path} {
         return -code error "FUTU_LOGIN_OTP_FILE must contain a trimmed 4-8 digit code"
     }
     return $value
+}
+
+proc delete_otp_file {path} {
+    if {[catch {file delete -- $path}]} {
+        return -code error "FUTU_LOGIN_OTP_FILE could not be removed"
+    }
 }
 
 proc probe_port {host port} {
@@ -59,28 +77,6 @@ proc wait_for_login_ready {host api_port websocket_port timeout_seconds} {
     return 0
 }
 
-proc run_test_mode {} {
-    if {$::env(FUTU_LOGIN_TEST_MODE) eq "otp"} {
-        set path $::env(FUTU_LOGIN_OTP_FILE)
-        if {[catch {set code [read_otp_file $path]}]} {
-            catch {file delete -force -- $path}
-            puts "OTP_INVALID"
-            exit 1
-        }
-        catch {file delete -force -- $path}
-        puts "OTP_VALID"
-        exit 0
-    }
-    if {$::env(FUTU_LOGIN_TEST_MODE) eq "ready"} {
-        if {[wait_for_login_ready 127.0.0.1 $::api_port $::websocket_port $::ready_timeout]} {
-            puts $::ready_marker
-            exit 0
-        }
-        exit 1
-    }
-    exit 64
-}
-
 proc restore_user_terminal {} {
     if {[catch {exec sh -c {test -t 0}}] == 0} {
         catch {stty echo}
@@ -91,8 +87,15 @@ proc read_phone_code {} {
     set otp_path [configured_otp_path]
     if {$otp_path ne ""} {
         if {[catch {set code [read_otp_file $otp_path]}]} {
-            catch {file delete -force -- $otp_path}
-            send_user "\n\[futu-docker\] FUTU_LOGIN_OTP_FILE 无效，登录已停止。\n"
+            if {[catch {delete_otp_file $otp_path}]} {
+                send_user "\n\[futu-docker\] FUTU_LOGIN_OTP_FILE 无法安全删除，登录已停止。\n"
+            } else {
+                send_user "\n\[futu-docker\] FUTU_LOGIN_OTP_FILE 无效，登录已停止。\n"
+            }
+            return -code error
+        }
+        if {[catch {delete_otp_file $otp_path}]} {
+            send_user "\n\[futu-docker\] FUTU_LOGIN_OTP_FILE 无法安全删除，登录已停止。\n"
             return -code error
         }
         return $code
@@ -184,10 +187,6 @@ proc copy_user_terminal_size_to_child {child_tty} {
     return 1
 }
 
-if {[info exists env(FUTU_LOGIN_TEST_MODE)]} {
-    run_test_mode
-}
-
 if {$argc == 0} {
     puts stderr "usage: futu-opend-direct-otp.expect command [args...]"
     exit 64
@@ -222,10 +221,6 @@ interact {
             exit 1
         }
         set submit_result [submit_phone_code $phone_code $telnet_host $telnet_port]
-        set otp_path [configured_otp_path]
-        if {$otp_path ne ""} {
-            catch {file delete -force -- $otp_path}
-        }
         if {$submit_result != 0} {
             exit 1
         }
