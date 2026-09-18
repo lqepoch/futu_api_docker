@@ -54,8 +54,15 @@ account="${FUTU_LOGIN_ACCOUNT:-}"
 password="${FUTU_LOGIN_PASSWORD:-}"
 
 if [[ -z "$account" ]]; then
-  account="$(read_from_tty 'Futu account / email / phone: ')"
+  account="$(read_from_tty 'Futu ID / email / phone (+country-code phone supported): ')"
 fi
+
+area_code="${FUTU_AREA_CODE:-}"
+if [[ "$account" =~ ^(\+[0-9]{1,4})[[:space:]]+([0-9]+)$ ]]; then
+  area_code="${BASH_REMATCH[1]}"
+  account="${BASH_REMATCH[2]}"
+fi
+
 if [[ -z "$password" ]]; then
   password="$(read_secret_from_tty 'Futu login password: ')"
 fi
@@ -75,7 +82,7 @@ install -d -m 0700 "$ENV_DIR"
 cat > "$ENV_FILE" <<EOF
 FUTU_LOGIN_ACCOUNT=$account
 FUTU_LOGIN_PASSWORD_B64=$password_b64
-FUTU_AREA_CODE=${FUTU_AREA_CODE:-}
+FUTU_AREA_CODE=$area_code
 FUTU_REMEMBER_PASSWORD=false
 FUTU_AUTO_REQUEST_PHONE_CODE=true
 FUTU_PHONE_CODE_REQUEST_DELAY_SECONDS=8
