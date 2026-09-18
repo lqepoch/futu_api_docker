@@ -8,6 +8,7 @@ on:
       - "Dockerfile"
       - "compose.yaml"
       - ".env.example"
+      - "install.sh"
       - "scripts/**"
       - "VERSION"
       - "UPSTREAM_SHA256"
@@ -25,7 +26,7 @@ on:
 
 concurrency:
   group: futu-opend-publish
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -122,6 +123,9 @@ jobs:
           set -Eeuo pipefail
           bash -n scripts/docker-entrypoint.sh
           bash -n scripts/futu-opend-cli
+          bash -n scripts/futu-auto-request-phone-code.sh
+          bash -n scripts/futu-verify
+          bash -n install.sh
           cp .env.example .env
           trap 'rm -f .env' EXIT
           docker compose -f compose.yaml config >/dev/null
