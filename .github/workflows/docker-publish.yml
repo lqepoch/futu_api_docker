@@ -177,6 +177,17 @@ jobs:
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
+      - name: Verify anonymous GHCR pull
+        if: steps.upstream.outputs.should_build == 'true' && success()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker logout "${REGISTRY}" >/dev/null 2>&1 || true
+          rm -f "${HOME}/.docker/config.json" || true
+          docker pull "${REGISTRY}/${IMAGE_NAME}:${{ steps.upstream.outputs.version }}"
+          docker image inspect "${REGISTRY}/${IMAGE_NAME}:${{ steps.upstream.outputs.version }}" >/dev/null
+          echo "Anonymous GHCR pull succeeded." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Record successfully published upstream version
         if: steps.upstream.outputs.should_build == 'true' && success()
         shell: bash
