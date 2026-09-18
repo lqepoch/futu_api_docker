@@ -91,11 +91,8 @@ proc read_phone_code {} {
     set otp_path [configured_otp_path]
     if {$otp_path ne ""} {
         if {[catch {set code [read_otp_file $otp_path]}]} {
+            catch {file delete -force -- $otp_path}
             send_user "\n\[futu-docker\] FUTU_LOGIN_OTP_FILE 无效，登录已停止。\n"
-            return -code error
-        }
-        if {[catch {file delete -force -- $otp_path}]} {
-            send_user "\n\[futu-docker\] FUTU_LOGIN_OTP_FILE 无法安全删除，登录已停止。\n"
             return -code error
         }
         return $code
