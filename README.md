@@ -14,7 +14,7 @@ ghcr.io/lqepoch/futu_api_docker:<OpenD版本>
 - Docker 只负责安装并运行官方 Futu OpenD。
 - 账号、登录密码、验证码全部走 OpenD 自己的登录流程。
 - 不在环境变量里保存富途登录密码。
-- 不使用 expect 自动代输账号密码。
+- 不自动代输账号、密码或验证码；手机验证码可在同一终端输入后由容器转发给 OpenD。
 - 不维护自定义验证码状态机。
 - OpenD 设备状态持久化到 Docker Volume。
 - 跨机器 WebSocket 默认启用 WSS/SSL。
@@ -52,13 +52,19 @@ docker run -it \
 1. 富途账号 / 手机号 / 邮箱
 2. 登录密码
 3. 是否记住密码
-4. 如触发设备锁验证，再完成手机验证码验证
+4. 如触发设备锁验证，在同一个终端直接输入手机验证码
 
 Docker 不会在 OpenD 之前重复读取账号；上面的命令只进入一次 Futu OpenD 原生交互流程。
 手机号默认按中国区号 `+86` 组合，因此在 OpenD 的账号提示处可以直接输入手机号。
 如果通过 `FUTU_LOGIN_ACCOUNT` 提供非敏感账号，支持 `13800138000`、`+86 13800138000`
 等手机号形式；邮箱若误带 `+86` 前缀会自动去掉，普通邮箱和富途 ID 不会加区号。
-密码和验证码仍由 OpenD 原生交互流程接收，不写入镜像、Volume、命令日志或环境文件。
+密码仍由 OpenD 原生交互流程接收。默认情况下，容器会在 OpenD 输出手机验证码提示后，
+在同一个终端读取验证码并立即转发到容器内部的 OpenD Telnet 端口；验证码不写入镜像、
+Volume、环境变量或日志。若需要关闭同终端转发，可设置：
+
+~~~bash
+-e FUTU_LOGIN_DIRECT_OTP=false
+~~~
 
 登录成功后，不要用 Ctrl+C 退出。
 
@@ -89,27 +95,20 @@ docker logs -f futu-opend
 
 ## 3. 手机验证码
 
-Futu 官方的手机验证码验证通过 OpenD 运维命令完成。
+默认启动命令不需要额外打开命令行。OpenD 请求验证码后，同一个终端会显示：
 
-如果首次登录提示需要手机验证码，在另一个终端执行：
+~~~text
+[futu-docker] 请输入手机验证码:
+~~~
+
+直接输入短信验证码并回车即可。容器内部仍然使用官方运维命令
+`input_phone_verify_code -code=验证码` 转发，不改变 OpenD 的认证协议。
+
+如果关闭了 `FUTU_LOGIN_DIRECT_OTP`，再使用旧的 Telnet 方式：
 
 ~~~bash
 docker exec -it futu-opend nc 127.0.0.1 22222
 ~~~
-
-请求验证码：
-
-~~~text
-req_phone_verify_code
-~~~
-
-等短信真正收到以后，再输入：
-
-~~~text
-input_phone_verify_code -code=123456
-~~~
-
-把 123456 换成实际收到的验证码。
 
 请求验证码和提交验证码是两个独立动作，不做自动延时提交。
 

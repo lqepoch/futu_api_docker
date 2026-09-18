@@ -55,7 +55,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       ca-certificates netcat-openbsd openssl tzdata \
+       ca-certificates expect netcat-openbsd openssl tzdata \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 --shell /bin/bash futu \
     && install -d -o futu -g futu -m 0700 /home/futu/.com.futunn.FutuOpenD
@@ -63,6 +63,9 @@ RUN apt-get update \
 COPY --from=downloader --chown=futu:futu /opt/futu-opend /opt/futu-opend
 COPY --chmod=0644 scripts/login-identity.sh /usr/local/lib/futu-login-identity.sh
 COPY --chmod=0755 scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY --chmod=0755 scripts/futu-opend-direct-otp.expect /usr/local/bin/futu-opend-direct-otp.expect
+
+RUN expect -f /usr/local/bin/futu-opend-direct-otp.expect /bin/true
 
 RUN ldd /opt/futu-opend/FutuOpenD | tee /tmp/futu-ldd.txt \
     && ! grep -q 'not found' /tmp/futu-ldd.txt

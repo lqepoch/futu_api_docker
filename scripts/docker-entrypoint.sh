@@ -133,12 +133,27 @@ fi
 
 cat >&2 <<EOF
 [futu-docker] OpenD 原生交互登录已启用
+[futu-docker] 手机验证码可在同一终端直接输入（可设置 FUTU_LOGIN_DIRECT_OTP=false 关闭）
 [futu-docker] API: ${FUTU_API_IP:-0.0.0.0}:${FUTU_API_PORT:-11111}
 [futu-docker] WSS: ${FUTU_WEBSOCKET_IP:-0.0.0.0}:${FUTU_WEBSOCKET_PORT:-33333}（SSL 已配置）
 [futu-docker] 持久化目录: $STATE_DIR
 [futu-docker] 查看 WebSocket 鉴权 key:
   docker exec futu-opend cat $WSS_DIR/auth.key
-[futu-docker] 如触发手机验证，请在另一个终端进入本容器 22222 运维端口处理
+[futu-docker] 如关闭同终端验证码转发，再使用本容器内部 22222 运维端口处理
 EOF
 
-exec "$OPEND_HOME/FutuOpenD" "${login_args[@]}" "$@"
+opend_command=("$OPEND_HOME/FutuOpenD" "${login_args[@]}" "$@")
+case "${FUTU_LOGIN_DIRECT_OTP:-true}" in
+  true|1|yes|on)
+    if [[ -t 0 && -t 1 ]]; then
+      exec /usr/local/bin/futu-opend-direct-otp.expect "${opend_command[@]}"
+    fi
+    ;;
+  false|0|no|off)
+    ;;
+  *)
+    die "FUTU_LOGIN_DIRECT_OTP must be true or false"
+    ;;
+esac
+
+exec "${opend_command[@]}"

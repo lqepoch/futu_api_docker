@@ -1,0 +1,76 @@
+#!/usr/bin/expect -f
+
+# Keep account and password input in OpenD's own terminal. When OpenD emits
+# its phone-code operation prompt, collect only the one-time code from the
+# same terminal and forward the operation command to OpenD's local Telnet
+# port. The code is never written to a file, environment variable, or log.
+set timeout -1
+log_user 1
+
+proc restore_user_terminal {} {
+    if {[catch {exec sh -c {test -t 0}}] == 0} {
+        catch {stty echo}
+    }
+}
+
+proc read_phone_code {} {
+    while {1} {
+        send_user "\n\[futu-docker\] 请输入手机验证码: "
+        stty -echo
+        expect_user {
+            -re {([0-9]{4,8})[\r\n]} {
+                set code $expect_out(1,string)
+                stty echo
+                send_user "\n"
+                return $code
+            }
+            -re {[^\r\n]*[\r\n]} {
+                stty echo
+                send_user "\n\[futu-docker\] 验证码应为 4-8 位数字，请重新输入。"
+            }
+            eof {
+                stty echo
+                exit 1
+            }
+        }
+    }
+}
+
+proc submit_phone_code {code host port} {
+    if {[catch {
+        set telnet_channel [socket $host $port]
+        fconfigure $telnet_channel -translation crlf -buffering line
+        puts $telnet_channel "input_phone_verify_code -code=$code"
+        flush $telnet_channel
+        close $telnet_channel
+    }]} {
+        send_user "\n\[futu-docker\] 无法提交手机验证码到 OpenD 运维端口，请改用 Telnet 方式。\n"
+        return 1
+    }
+    return 0
+}
+
+if {$argc == 0} {
+    puts stderr "usage: futu-opend-direct-otp.expect command [args...]"
+    exit 64
+}
+
+set telnet_host "127.0.0.1"
+set telnet_port "22222"
+catch {set telnet_host $env(FUTU_LOGIN_TELNET_HOST)}
+catch {set telnet_port $env(FUTU_TELNET_PORT)}
+trap {restore_user_terminal; exit 130} SIGINT
+trap {restore_user_terminal; exit 143} SIGTERM
+
+spawn -noecho {*}$argv
+interact {
+    -o -re {input_phone_verify_code[[:space:]]+-code=[0-9]+} {
+        set phone_code [read_phone_code]
+        submit_phone_code $phone_code $telnet_host $telnet_port
+    }
+    eof {return}
+}
+
+restore_user_terminal
+set wait_result [wait]
+exit [lindex $wait_result 3]
