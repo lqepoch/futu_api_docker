@@ -1,9 +1,11 @@
 # syntax=docker/dockerfile:1.7
 
 ARG FUTU_OPEND_DOWNLOAD_URL="https://www.futunn.com/download/fetch-lasted-link?name=opend-ubuntu"
+ARG FUTU_OPEND_ARCHIVE_SHA256=""
 
 FROM ubuntu:24.04 AS downloader
 ARG FUTU_OPEND_DOWNLOAD_URL
+ARG FUTU_OPEND_ARCHIVE_SHA256
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
@@ -16,6 +18,9 @@ RUN set -eux; \
       --write-out '%{url_effective}' \
       "${FUTU_OPEND_DOWNLOAD_URL}")"; \
     printf '%s\n' "$effective_url" > /tmp/FUTU_UPSTREAM_URL; \
+    if [ -n "${FUTU_OPEND_ARCHIVE_SHA256}" ]; then \
+      printf '%s  %s\n' "${FUTU_OPEND_ARCHIVE_SHA256}" /tmp/futu-opend.tar.gz | sha256sum -c -; \
+    fi; \
     tar -tzf /tmp/futu-opend.tar.gz >/dev/null; \
     mkdir -p /tmp/unpacked /opt/futu-opend; \
     tar -xzf /tmp/futu-opend.tar.gz -C /tmp/unpacked; \
@@ -24,10 +29,15 @@ RUN set -eux; \
     cp -a "$(dirname "$executable")/." /opt/futu-opend/; \
     cp /tmp/FUTU_UPSTREAM_URL /opt/futu-opend/FUTU_UPSTREAM_URL; \
     chmod 0755 /opt/futu-opend/FutuOpenD; \
-    test -f /opt/futu-opend/Appdata.dat; \
     test -f /opt/futu-opend/FutuOpenD.xml
 
 FROM ubuntu:24.04 AS runtime
+ARG FUTU_OPEND_VERSION="unknown"
+LABEL org.opencontainers.image.source="https://github.com/lqepoch/futu_api_docker" \
+      org.opencontainers.image.title="Futu OpenD on Ubuntu 24.04" \
+      org.opencontainers.image.description="Containerized Futu OpenD with persistent interactive login, API RSA encryption, and WSS support" \
+      org.opencontainers.image.version="${FUTU_OPEND_VERSION}" \
+      org.opencontainers.image.licenses="Apache-2.0"
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=Asia/Hong_Kong \
     HOME=/home/futu
