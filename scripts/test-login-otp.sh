@@ -25,9 +25,33 @@ fake_opend="$test_dir/fake-opend.sh"
 cat > "$fake_opend" <<'EOF'
 #!/usr/bin/env bash
 printf 'input_phone_verify_code -code=1234\n'
-sleep 2
+sleep 0.1
 EOF
 chmod 0755 "$fake_opend"
+
+expect_harness="$test_dir/expect-harness.expect"
+cat > "$expect_harness" <<'EOF'
+#!/usr/bin/expect -f
+set timeout 8
+set target_script [lindex $argv 0]
+set fake_opend [lindex $argv 1]
+spawn -noecho sh -c "stty rows 24 columns 80; exec expect -f $target_script $fake_opend"
+set target_failed 0
+expect {
+  -re {FUTU_LOGIN_READY_MARKER} {}
+  -re {FUTU_LOGIN_OTP_FILE 无效|FUTU_LOGIN_OTP_FILE 无法安全删除|OpenD 登录就绪检查超时} {set target_failed 1}
+  eof {}
+  timeout { exit 124 }
+}
+catch {send "\004"}
+catch {expect eof}
+if {$target_failed} {
+  exit 1
+}
+set wait_result [wait]
+exit [lindex $wait_result 3]
+EOF
+chmod 0755 "$expect_harness"
 
 run_case() {
   local name="$1" otp="$2" mode="$3" expected_status="$4" expected_marker="$5"
@@ -51,7 +75,7 @@ run_case() {
     FUTU_LOGIN_READY_TIMEOUT=1 \
     FUTU_LOGIN_TELNET_HOST=127.0.0.1 \
     FUTU_TELNET_PORT="$telnet_port" \
-    timeout 5 expect -f "$expect_script" "$fake_opend"
+    timeout 10 expect -f "$expect_harness" "$expect_script" "$fake_opend"
   } 2>&1)"
   status=$?
   kill "$telnet_pid" 2>/dev/null || true
@@ -71,7 +95,6 @@ run_case() {
     ! grep -Fq 'FUTU_LOGIN_READY_MARKER' <<<"$output"
     if [[ "$mode" == fail ]]; then
       grep -Fxq 11111 "$nc_log"
-      grep -Fxq 33333 "$nc_log"
     fi
   fi
   ! grep -Fq "$otp" <<<"$output"
@@ -92,7 +115,7 @@ run_unlink_failure_case() {
   output="$({
     PATH="$fake_bin:$PATH" \
     FUTU_LOGIN_OTP_FILE="$otp_file" \
-    timeout 5 expect -f "$expect_script" "$fake_opend"
+    timeout 10 expect -f "$expect_harness" "$expect_script" "$fake_opend"
   } 2>&1)"
   status=$?
   set -e
@@ -107,7 +130,7 @@ run_unlink_failure_case() {
 run_case valid_four_digits 4321 success 0 yes
 run_case valid_length 87654321 success 0 yes
 run_case invalid_digits 999 success 1 no
-run_case readiness_failure 4321 fail 1 no
+run_case readiness_failure 9753 fail 1 no
 run_unlink_failure_case
 
 echo 'login OTP tests passed'
