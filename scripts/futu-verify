@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  futu-verify phone <code>
+  futu-verify request-phone
+  futu-verify pic <code>
+  futu-verify request-pic
+  futu-verify ping
+  futu-verify show-api-key
+  futu-verify show-ws-key
+  futu-verify show-ws-cert
+EOF
+  exit 2
+}
+
+cmd="${1:-}"
+case "$cmd" in
+  phone)
+    code="${2:-}"
+    [[ "$code" =~ ^[0-9]{4,8}$ ]] || usage
+    exec futu-opend-cli input_phone_verify_code "-code=$code"
+    ;;
+  request-phone)
+    exec futu-opend-cli req_phone_verify_code
+    ;;
+  pic)
+    code="${2:-}"
+    [[ "$code" =~ ^[0-9A-Za-z]{3,12}$ ]] || usage
+    exec futu-opend-cli input_pic_verify_code "-code=$code"
+    ;;
+  request-pic)
+    exec futu-opend-cli req_pic_verify_code
+    ;;
+  ping)
+    exec futu-opend-cli ping
+    ;;
+  show-api-key)
+    exec cat /home/futu/.com.futunn.FutuOpenD/docker-secrets/api-rsa.pem
+    ;;
+  show-ws-key)
+    exec cat /home/futu/.com.futunn.FutuOpenD/docker-secrets/websocket-auth-key
+    ;;
+  show-ws-cert)
+    exec cat /home/futu/.com.futunn.FutuOpenD/docker-secrets/websocket.crt
+    ;;
+  *)
+    usage
+    ;;
+esac
