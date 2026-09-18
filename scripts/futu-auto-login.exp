@@ -44,6 +44,8 @@ spawn -noecho {*}$cmd
 set sent_account 0
 set sent_password 0
 set sent_remember 0
+set phone_marker "/run/futu/phone-code-needed"
+set pic_marker "/run/futu/pic-code-needed"
 
 expect {
     -re {(?i)(login account|account|账号|帳號).*[：:]\s*$} {
@@ -72,6 +74,16 @@ expect {
             if {$remember} { send -- "y\r" } else { send -- "n\r" }
             set sent_remember 1
         }
+        exp_continue
+    }
+    -re {(?i)(NeedPhoneVerifyCode|NEED_PHONE_VERIFY_CODE|phone verification code|phone verify code|手机验证码|手機驗證碼)} {
+        catch {close [open $phone_marker w]}
+        puts stderr "OpenD entered phone-verification state; SMS request will be issued separately."
+        exp_continue
+    }
+    -re {(?i)(NeedPicVerifyCode|NEED_PIC_VERIFY_CODE|graphic verification code|picture verification code|图形验证码|圖形驗證碼)} {
+        catch {close [open $pic_marker w]}
+        puts stderr "OpenD requires a graphic verification code. Use: docker exec futu-opend futu-verify request-pic"
         exp_continue
     }
     eof {
