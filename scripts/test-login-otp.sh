@@ -25,7 +25,7 @@ fake_opend="$test_dir/fake-opend.sh"
 cat > "$fake_opend" <<'EOF'
 #!/usr/bin/env bash
 printf 'input_phone_verify_code -code=1234\n'
-sleep 0.1
+sleep 2
 EOF
 chmod 0755 "$fake_opend"
 
@@ -38,12 +38,9 @@ run_case() {
   [[ "$name" == valid_length ]] && telnet_port=23457
   printf '%s\n' "$otp" > "$otp_file"
   chmod 0600 "$otp_file"
-  "$real_nc" -k -l 127.0.0.1 "$telnet_port" > "$submitted" 2>/dev/null &
+  "$real_nc" -l 127.0.0.1 "$telnet_port" > "$submitted" 2>/dev/null &
   telnet_pid=$!
-  for _ in {1..20}; do
-    "$real_nc" -z -w 1 127.0.0.1 "$telnet_port" >/dev/null 2>&1 && break
-    sleep 0.05
-  done
+  sleep 0.1
 
   set +e
   output="$({
@@ -72,6 +69,10 @@ run_case() {
     grep -Fq "input_phone_verify_code -code=$otp" "$submitted"
   else
     ! grep -Fq 'FUTU_LOGIN_READY_MARKER' <<<"$output"
+    if [[ "$mode" == fail ]]; then
+      grep -Fxq 11111 "$nc_log"
+      grep -Fxq 33333 "$nc_log"
+    fi
   fi
   ! grep -Fq "$otp" <<<"$output"
   [[ ! -e "$otp_file" ]] || {
@@ -105,7 +106,8 @@ run_unlink_failure_case() {
 
 run_case valid_four_digits 4321 success 0 yes
 run_case valid_length 87654321 success 0 yes
-run_case invalid_digits 999 fail 1 no
+run_case invalid_digits 999 success 1 no
+run_case readiness_failure 4321 fail 1 no
 run_unlink_failure_case
 
 echo 'login OTP tests passed'
