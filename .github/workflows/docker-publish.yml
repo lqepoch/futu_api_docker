@@ -129,6 +129,9 @@ jobs:
           grep -q 'futu-login-identity.sh' Dockerfile
           grep -q 'expect' Dockerfile
           grep -q 'FUTU_LOGIN_DIRECT_OTP' scripts/docker-entrypoint.sh
+          grep -q 'set child_tty \$spawn_out(slave,name)' scripts/futu-opend-direct-otp.expect
+          grep -q -- '-input \$user_spawn_id -output \$spawn_id' scripts/futu-opend-direct-otp.expect
+          grep -q 'send -raw -i \$spawn_id' scripts/futu-opend-direct-otp.expect
           ! grep -q 'read -r FUTU_LOGIN_ACCOUNT </dev/tty' scripts/docker-entrypoint.sh
           grep -q 'websocket_private_key' scripts/docker-entrypoint.sh
           grep -q 'websocket_cert' scripts/docker-entrypoint.sh

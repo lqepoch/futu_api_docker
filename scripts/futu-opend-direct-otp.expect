@@ -50,6 +50,31 @@ proc submit_phone_code {code host port} {
     return 0
 }
 
+proc copy_user_terminal_size_to_child {child_tty} {
+    # Expect allocates a fresh pty for OpenD. Without copying the attached
+    # terminal dimensions, that pty reports 0x0 to OpenD; its native console
+    # then consumes account/password input as empty lines. Write explicitly to
+    # the spawned OpenD pty so foreground and attach-after-start both work.
+    if {[catch {set size [split [exec stty size] " "]}]} {
+        return 0
+    }
+    if {[llength $size] != 2} {
+        return 0
+    }
+
+    set rows [lindex $size 0]
+    set columns [lindex $size 1]
+    if {![string is integer -strict $rows] || ![string is integer -strict $columns] \
+        || $rows <= 0 || $columns <= 0} {
+        return 0
+    }
+    set stty_result [catch {stty rows $rows columns $columns < $child_tty}]
+    if {$stty_result} {
+        return 0
+    }
+    return 1
+}
+
 if {$argc == 0} {
     puts stderr "usage: futu-opend-direct-otp.expect command [args...]"
     exit 64
@@ -63,8 +88,20 @@ trap {restore_user_terminal; exit 130} SIGINT
 trap {restore_user_terminal; exit 143} SIGTERM
 
 spawn -noecho {*}$argv
+set child_tty $spawn_out(slave,name)
+copy_user_terminal_size_to_child $child_tty
 interact {
-    -o -re {input_phone_verify_code[[:space:]]+-code=[0-9]+} {
+    -input $user_spawn_id -output $spawn_id
+    -re {(.|\n)+} {
+        # `docker run -d -it` has a 0x0 pty until `docker attach` supplies the
+        # terminal size. Copy it on the first byte (and on later keystrokes so
+        # terminal resizing also reaches OpenD), then forward the exact input.
+        copy_user_terminal_size_to_child $child_tty
+        send -raw -i $spawn_id $interact_out(0,string)
+    }
+    -input $spawn_id -output $user_spawn_id
+    -re {input_phone_verify_code[[:space:]]+-code=[0-9]+} {
+        send_user -raw $interact_out(0,string)
         set phone_code [read_phone_code]
         submit_phone_code $phone_code $telnet_host $telnet_port
     }

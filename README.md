@@ -83,6 +83,9 @@ Ctrl+Q
 docker attach futu-opend
 ~~~
 
+如果容器是用 `-d -it` 后台启动，再执行 `docker attach` 也可以正常输入；桥接层会在首次
+按键时同步 attach 终端尺寸到 OpenD，不会把账号或密码当成空输入。
+
 查看日志：
 
 ~~~bash
