@@ -123,7 +123,9 @@ jobs:
         run: |
           set -Eeuo pipefail
           bash -n scripts/docker-entrypoint.sh
+          bash scripts/test-login-identity.sh
           grep -q 'FROM ubuntu:24.04' Dockerfile
+          grep -q 'futu-login-identity.sh' Dockerfile
           grep -q 'websocket_private_key' scripts/docker-entrypoint.sh
           grep -q 'websocket_cert' scripts/docker-entrypoint.sh
           grep -q 'rsa_private_key' scripts/docker-entrypoint.sh

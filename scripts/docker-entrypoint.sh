@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# shellcheck source=/usr/local/lib/futu-login-identity.sh
+source /usr/local/lib/futu-login-identity.sh
+
 OPEND_HOME="/opt/futu-opend"
 STATE_DIR="${HOME:-/home/futu}/.com.futunn.FutuOpenD"
 SECURITY_DIR="$STATE_DIR/docker-security"
@@ -108,6 +111,26 @@ cat > "$CONFIG_FILE" <<EOF
 EOF
 chmod 0600 "$CONFIG_FILE"
 
+login_args=("-cfg_file=$CONFIG_FILE")
+if [[ -n "${FUTU_LOGIN_ACCOUNT:-}" ]]; then
+  futu_normalize_login_account "${FUTU_LOGIN_ACCOUNT}" "${FUTU_AREA_CODE:-+86}" \
+    || die "FUTU_LOGIN_ACCOUNT is invalid"
+  login_args+=("-login_account=$FUTU_LOGIN_ACCOUNT_NORMALIZED")
+  if [[ "$FUTU_LOGIN_ACCOUNT_KIND" == "phone" ]]; then
+    login_args+=("-area_code=$FUTU_LOGIN_AREA_CODE_NORMALIZED")
+  fi
+elif [[ -n "${FUTU_AREA_CODE:-}" ]]; then
+  normalized_area_code="$(futu_normalize_area_code "$FUTU_AREA_CODE")" \
+    || die "FUTU_AREA_CODE is invalid"
+  login_args+=("-area_code=$normalized_area_code")
+else
+  # OpenD's interactive prompt accepts a bare phone number when the area code
+  # is supplied as a startup parameter. Email/Futu-ID input is unaffected.
+  default_area_code="$(futu_normalize_area_code "${FUTU_DEFAULT_PHONE_AREA_CODE:-+86}")" \
+    || die "FUTU_DEFAULT_PHONE_AREA_CODE is invalid"
+  login_args+=("-area_code=$default_area_code")
+fi
+
 cat >&2 <<EOF
 [futu-docker] OpenD 原生交互登录已启用
 [futu-docker] API: ${FUTU_API_IP:-0.0.0.0}:${FUTU_API_PORT:-11111}
@@ -118,4 +141,4 @@ cat >&2 <<EOF
 [futu-docker] 如触发手机验证，请在另一个终端进入本容器 22222 运维端口处理
 EOF
 
-exec "$OPEND_HOME/FutuOpenD" -cfg_file="$CONFIG_FILE" "$@"
+exec "$OPEND_HOME/FutuOpenD" "${login_args[@]}" "$@"
