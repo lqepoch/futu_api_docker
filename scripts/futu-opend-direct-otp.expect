@@ -7,6 +7,58 @@
 set timeout -1
 log_user 1
 
+set ready_marker "FUTU_LOGIN_READY_MARKER"
+set api_port "11111"
+set websocket_port "33333"
+set ready_timeout "60"
+catch {set api_port $env(FUTU_API_PORT)}
+catch {set websocket_port $env(FUTU_WEBSOCKET_PORT)}
+catch {set ready_timeout $env(FUTU_LOGIN_READY_TIMEOUT)}
+
+proc configured_otp_path {} {
+    if {[info exists ::env(FUTU_LOGIN_OTP_FILE)] && $::env(FUTU_LOGIN_OTP_FILE) ne ""} {
+        return $::env(FUTU_LOGIN_OTP_FILE)
+    }
+    return {}
+}
+
+proc read_otp_file {path} {
+    if {[catch {file type $path} file_type] || $file_type ne "file" || ![file readable $path]} {
+        return -code error "FUTU_LOGIN_OTP_FILE must be a regular readable file"
+    }
+    set channel [open $path r]
+    set value [string trim [read $channel]]
+    close $channel
+    if {![regexp {^[0-9]{4,8}$} $value]} {
+        return -code error "FUTU_LOGIN_OTP_FILE must contain a trimmed 4-8 digit code"
+    }
+    return $value
+}
+
+proc probe_port {host port} {
+    return [expr {![catch {exec nc -z -w 1 $host $port}]}]
+}
+
+proc wait_for_login_ready {host api_port websocket_port timeout_seconds} {
+    if {![string is integer -strict $timeout_seconds] || $timeout_seconds <= 0} {
+        return 0
+    }
+    set deadline [expr {[clock milliseconds] + ($timeout_seconds * 1000)}]
+    set consecutive_successes 0
+    while {[clock milliseconds] < $deadline} {
+        if {[probe_port $host $api_port] && [probe_port $host $websocket_port]} {
+            incr consecutive_successes
+            if {$consecutive_successes >= 3} {
+                return 1
+            }
+        } else {
+            set consecutive_successes 0
+        }
+        after 250
+    }
+    return 0
+}
+
 proc restore_user_terminal {} {
     if {[catch {exec sh -c {test -t 0}}] == 0} {
         catch {stty echo}
@@ -14,6 +66,19 @@ proc restore_user_terminal {} {
 }
 
 proc read_phone_code {} {
+    set otp_path [configured_otp_path]
+    if {$otp_path ne ""} {
+        if {[catch {set code [read_otp_file $otp_path]}]} {
+            send_user "\n\[futu-docker\] FUTU_LOGIN_OTP_FILE 无效，登录已停止。\n"
+            return -code error
+        }
+        if {[catch {file delete -force -- $otp_path}]} {
+            send_user "\n\[futu-docker\] FUTU_LOGIN_OTP_FILE 无法安全删除，登录已停止。\n"
+            return -code error
+        }
+        return $code
+    }
+
     while {1} {
         send_user "\n\[futu-docker\] 请输入手机验证码: "
         stty -echo
@@ -107,8 +172,10 @@ if {$argc == 0} {
 
 set telnet_host "127.0.0.1"
 set telnet_port "22222"
+set ready_host "127.0.0.1"
 catch {set telnet_host $env(FUTU_LOGIN_TELNET_HOST)}
 catch {set telnet_port $env(FUTU_TELNET_PORT)}
+catch {set ready_host $env(FUTU_LOGIN_READY_HOST)}
 trap {restore_user_terminal; exit 130} SIGINT
 trap {restore_user_terminal; exit 143} SIGTERM
 
@@ -128,9 +195,22 @@ interact {
     }
     -input $spawn_id -output $user_spawn_id
     -re {input_phone_verify_code[[:space:]]+-code=[0-9]+} {
-        send_user -raw $interact_out(0,string)
-        set phone_code [read_phone_code]
-        submit_phone_code $phone_code $telnet_host $telnet_port
+        if {[catch {set phone_code [read_phone_code]}]} {
+            exit 1
+        }
+        set submit_result [submit_phone_code $phone_code $telnet_host $telnet_port]
+        set otp_path [configured_otp_path]
+        if {$otp_path ne ""} {
+            catch {file delete -force -- $otp_path}
+        }
+        if {$submit_result != 0} {
+            exit 1
+        }
+        if {![wait_for_login_ready $ready_host $api_port $websocket_port $ready_timeout]} {
+            send_user "\n\[futu-docker\] OpenD 登录就绪检查超时，登录已停止。\n"
+            exit 1
+        }
+        send_user "\n$ready_marker\n"
     }
     eof {return}
 }
