@@ -14,7 +14,14 @@ ghcr.io/lqepoch/futu_api_docker:<OpenD版本>
 - Docker 只负责安装并运行官方 Futu OpenD。
 - 账号、登录密码、验证码全部走 OpenD 自己的登录流程。
 - 不在环境变量里保存富途登录密码。
-- 不自动代输账号、密码或验证码；手机验证码可在同一终端输入后由容器转发给 OpenD。
+- 默认不自动代输验证码；手机验证码可在同一终端输入后由容器转发给 OpenD。
+- 可选通过安全 OTP 文件启用一次性自动提交：设置 `FUTU_LOGIN_OTP_FILE`，文件必须由容器内
+  `futu` 用户（UID 10001）所有、owner 可读且 group/other 无权限（建议使用 `0400` 或 `0600`）、是非符号链接的普通文件，且所在
+  目录允许 unlink。容器读取后立即删除；任一校验、读取或删除失败都会 fail closed。验证码绝不
+  写入日志、环境变量或镜像。未设置该变量时仍由用户手动输入。
+- 可在宿主机使用 `expect scripts/futu-opend-auto-attach.expect futu-opend` 自动 attach；helper
+  等待固定 `FUTU_LOGIN_READY_MARKER` 后发送 Ctrl-P/Ctrl-Q，只结束 attach，不停止容器或 OpenD。
+  未看到 marker 的已有 healthy 容器不会触发 detach。
 - 不维护自定义验证码状态机。
 - OpenD 设备状态持久化到 Docker Volume。
 - 跨机器 WebSocket 默认启用 WSS/SSL。
@@ -81,6 +88,29 @@ Ctrl+Q
 
 即可从容器终端 detach，OpenD 会继续在后台运行。
 
+### 宿主机自动 attach/detach
+
+需要自动等待登录完成时，在宿主机安装 `expect` 和 Docker CLI，然后执行：
+
+~~~bash
+expect scripts/futu-opend-auto-attach.expect futu-opend
+~~~
+
+这个宿主机 helper 只执行 `docker attach`，等待容器输出固定的
+`FUTU_LOGIN_READY_MARKER`，再向 attach 会话发送精确的 Ctrl-P/Ctrl-Q。它只结束当前
+attach，不会停止或重启容器，也不会停止 OpenD。未看到 marker 时（包括一个已经显示
+`healthy` 但尚未输出 marker 的容器）不会发送 detach；等待超时返回退出码 `124`。
+
+可通过 `FUTU_LOGIN_AUTO_ATTACH_TIMEOUT` 设置等待秒数，必须是正整数，默认 `300`；参数错误
+返回 `64`。helper 运行在宿主机，不需要也不应该把 Docker socket 挂载到容器内。安全示例：
+
+~~~bash
+FUTU_LOGIN_AUTO_ATTACH_TIMEOUT=300 \
+  expect scripts/futu-opend-auto-attach.expect futu-opend
+~~~
+
+手动使用 `docker attach futu-opend` 时仍然按 Ctrl-P、Ctrl-Q detach；Ctrl+C 不用于 detach。
+
 以后重新进入 OpenD 控制台：
 
 ~~~bash
@@ -112,6 +142,50 @@ docker logs -f futu-opend
 
 直接输入短信验证码并回车即可。容器内部仍然使用官方运维命令
 `input_phone_verify_code -code=验证码` 转发，不改变 OpenD 的认证协议。
+
+### 可选 OTP file 自动提交
+
+默认仍然手动输入验证码。只有显式设置 `FUTU_LOGIN_OTP_FILE` 时，容器才会读取一次性验证码
+文件。文件必须满足全部条件：
+
+- 容器内所有者是 `futu` 用户 UID `10001`；
+- owner 必须可读，且 group/other 不得有权限（建议使用 `0400` 或 `0600`）；
+- 是非 symlink 的 regular file；
+- 所在目录允许容器用户 unlink 文件。
+
+容器读取后立即删除文件；校验、读取或删除任一失败都会 fail closed，不提交验证码，也不会
+输出验证码。验证码绝不写入日志、环境变量或镜像。推荐把宿主机目录以可写 bind mount 挂入，
+而不是把单个文件以只读方式挂载（只读挂载通常无法完成读取后的 unlink）：
+
+~~~bash
+otp_dir="$(mktemp -d)"
+read -r -s -p 'OTP: ' otp
+printf '\n'
+printf '%s\n' "$otp" > "$otp_dir/code"
+unset otp
+sudo chown 10001:10001 "$otp_dir" "$otp_dir/code"
+sudo chmod 0700 "$otp_dir"
+sudo chmod 0400 "$otp_dir/code"
+
+docker run -it \
+  --name futu-opend \
+  --restart unless-stopped \
+  -p 127.0.0.1:11111:11111 \
+  -p 33333:33333 \
+  -v futu-opend-data:/home/futu/.com.futunn.FutuOpenD \
+  --mount "type=bind,src=$otp_dir,dst=/run/futu-otp,rw" \
+  -e FUTU_LOGIN_OTP_FILE=/run/futu-otp/code \
+  ghcr.io/lqepoch/futu_api_docker:latest
+~~~
+
+bind mount 的宿主机目录也必须允许 UID 10001 删除文件；不要把 Docker socket 挂进容器，也不要
+把验证码放进 `-e`、镜像层、Volume 或日志。若目录权限或 owner 不匹配，登录会安全失败并保留
+必要的非敏感失败提示。
+
+就绪标记不是单次端口探测：`FUTU_LOGIN_READY_MARKER` 固定不变，只有 API 和 WSS 都可用并
+连续通过 3 次检查后才输出。`FUTU_LOGIN_READY_TIMEOUT` 默认 `60` 秒，`FUTU_LOGIN_READY_HOST`
+默认 `127.0.0.1`；两个端口默认分别为 API `11111`、WSS `33333`。超时会停止该登录流程，
+不会输出 marker。
 
 如果关闭了 `FUTU_LOGIN_DIRECT_OTP`，再使用旧的 Telnet 方式：
 

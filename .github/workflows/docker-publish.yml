@@ -8,6 +8,9 @@ on:
       - "Dockerfile"
       - "scripts/docker-entrypoint.sh"
       - "scripts/futu-opend-direct-otp.expect"
+      - "scripts/futu-opend-auto-attach.expect"
+      - "scripts/test-login-otp.sh"
+      - "scripts/test-auto-attach.sh"
       - "README.md"
       - "VERSION"
       - "UPSTREAM_SHA256"
@@ -126,7 +129,16 @@ jobs:
           set -Eeuo pipefail
           bash -n scripts/docker-entrypoint.sh
           bash scripts/test-login-identity.sh
+          bash -n scripts/test-login-otp.sh scripts/test-auto-attach.sh
           test -f scripts/futu-opend-direct-otp.expect
+          test -x scripts/futu-opend-auto-attach.expect
+          test -f scripts/test-login-otp.sh
+          test -f scripts/test-auto-attach.sh
+          grep -q 'FUTU_LOGIN_OTP_FILE' scripts/test-login-otp.sh
+          grep -q 'FUTU_LOGIN_READY_MARKER' scripts/test-auto-attach.sh
+          grep -q 'FUTU_LOGIN_AUTO_ATTACH_TIMEOUT' scripts/futu-opend-auto-attach.expect
+          grep -q 'send -raw -i \$attach_spawn_id "\\020\\021"' scripts/futu-opend-auto-attach.expect
+          ! grep -q 'futu-opend-auto-attach.expect' Dockerfile
           grep -q 'FROM ubuntu:24.04' Dockerfile
           grep -q 'futu-login-identity.sh' Dockerfile
           grep -q 'expect' Dockerfile
