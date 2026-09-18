@@ -126,6 +126,7 @@ jobs:
           bash scripts/test-login-identity.sh
           grep -q 'FROM ubuntu:24.04' Dockerfile
           grep -q 'futu-login-identity.sh' Dockerfile
+          grep -q 'FUTU_LOGIN_ACCOUNT_PROMPT' scripts/docker-entrypoint.sh
           grep -q 'websocket_private_key' scripts/docker-entrypoint.sh
           grep -q 'websocket_cert' scripts/docker-entrypoint.sh
           grep -q 'rsa_private_key' scripts/docker-entrypoint.sh

@@ -111,6 +111,16 @@ cat > "$CONFIG_FILE" <<EOF
 EOF
 chmod 0600 "$CONFIG_FILE"
 
+if [[ -z "${FUTU_LOGIN_ACCOUNT:-}" && "${FUTU_LOGIN_ACCOUNT_PROMPT:-true}" != "false" ]]; then
+  if [[ -r /dev/tty ]]; then
+    printf '[futu-docker] Futu ID / email / phone (手机号可直接输入): ' >/dev/tty
+    IFS= read -r FUTU_LOGIN_ACCOUNT </dev/tty \
+      || die "unable to read FUTU_LOGIN_ACCOUNT from the attached terminal"
+  else
+    die "FUTU_LOGIN_ACCOUNT is required when no interactive terminal is attached"
+  fi
+fi
+
 login_args=("-cfg_file=$CONFIG_FILE")
 if [[ -n "${FUTU_LOGIN_ACCOUNT:-}" ]]; then
   futu_normalize_login_account "${FUTU_LOGIN_ACCOUNT}" "${FUTU_AREA_CODE:-+86}" \
