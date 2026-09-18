@@ -35,7 +35,7 @@ FROM ubuntu:24.04 AS runtime
 ARG FUTU_OPEND_VERSION="unknown"
 LABEL org.opencontainers.image.source="https://github.com/lqepoch/futu_api_docker" \
       org.opencontainers.image.title="Futu OpenD on Ubuntu 24.04" \
-      org.opencontainers.image.description="Containerized Futu OpenD with persistent interactive login, API RSA encryption, and WSS support" \
+      org.opencontainers.image.description="Ready-to-run Futu OpenD with automated interactive login, persistent device state, API RSA and WSS" \
       org.opencontainers.image.version="${FUTU_OPEND_VERSION}" \
       org.opencontainers.image.licenses="Apache-2.0"
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -43,7 +43,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     HOME=/home/futu
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       ca-certificates netcat-openbsd procps tzdata \
+       ca-certificates expect netcat-openbsd openssl procps tzdata \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 --shell /bin/bash futu \
     && install -d -o futu -g futu -m 0700 \
@@ -52,13 +52,16 @@ RUN apt-get update \
 COPY --from=downloader --chown=futu:futu /opt/futu-opend /opt/futu-opend
 COPY --chmod=0755 scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY --chmod=0755 scripts/futu-opend-cli /usr/local/bin/futu-opend-cli
+COPY --chmod=0755 scripts/futu-auto-login.exp /usr/local/bin/futu-auto-login
+COPY --chmod=0755 scripts/futu-auto-request-phone-code.sh /usr/local/bin/futu-auto-request-phone-code
+COPY --chmod=0755 scripts/futu-verify /usr/local/bin/futu-verify
 RUN ldd /opt/futu-opend/FutuOpenD | tee /tmp/futu-ldd.txt \
     && ! grep -q 'not found' /tmp/futu-ldd.txt
 USER futu:futu
 WORKDIR /opt/futu-opend
 VOLUME ["/home/futu/.com.futunn.FutuOpenD"]
 EXPOSE 11111 33333
-HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=5 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=5 \
   CMD nc -z -w 3 127.0.0.1 "${FUTU_API_PORT:-11111}" || exit 1
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["serve"]
