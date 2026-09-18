@@ -122,7 +122,9 @@ jobs:
           set -Eeuo pipefail
           bash -n scripts/docker-entrypoint.sh
           bash -n scripts/futu-opend-cli
-          docker compose --env-file .env.example -f compose.yaml config >/dev/null
+          cp .env.example .env
+          trap 'rm -f .env' EXIT
+          docker compose -f compose.yaml config >/dev/null
 
       - name: Set up Docker Buildx
         if: steps.upstream.outputs.should_build == 'true'
