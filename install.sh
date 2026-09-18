@@ -6,6 +6,7 @@ CONTAINER="${FUTU_CONTAINER_NAME:-futu-opend}"
 VOLUME="${FUTU_STATE_VOLUME:-futu-opend-data}"
 ENV_DIR="${FUTU_ENV_DIR:-/etc/futu-opend}"
 ENV_FILE="$ENV_DIR/futu.env"
+META_FILE="$ENV_DIR/deploy.env"
 API_PORT="${FUTU_API_PORT:-11111}"
 WS_PORT="${FUTU_WEBSOCKET_PORT:-33333}"
 API_PUBLISH="${FUTU_API_PUBLISH_ADDRESS:-127.0.0.1}"
@@ -21,6 +22,11 @@ if ! command -v docker >/dev/null 2>&1; then
   apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io ca-certificates curl openssl
   systemctl enable --now docker
+fi
+
+if ! command -v openssl >/dev/null 2>&1; then
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y openssl
 fi
 
 if ! docker info >/dev/null 2>&1; then
@@ -93,6 +99,14 @@ FUTU_FUTURES_TZ=UTC+8
 EOF
 chmod 0600 "$ENV_FILE"
 
+cat > "$META_FILE" <<EOF
+FUTU_IMAGE=$IMAGE
+FUTU_CONTAINER_NAME=$CONTAINER
+FUTU_STATE_VOLUME=$VOLUME
+FUTU_ENV_FILE=$ENV_FILE
+EOF
+chmod 0600 "$META_FILE"
+
 docker volume create "$VOLUME" >/dev/null
 docker pull "$IMAGE"
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
@@ -112,7 +126,23 @@ docker run -d \
 cat > /usr/local/bin/futu-opendctl <<'CTL'
 #!/usr/bin/env bash
 set -Eeuo pipefail
+
+meta="/etc/futu-opend/deploy.env"
+if [[ -r "$meta" ]]; then
+  # shellcheck disable=SC1090
+  source "$meta"
+fi
+
 container="${FUTU_CONTAINER_NAME:-futu-opend}"
+volume="${FUTU_STATE_VOLUME:-futu-opend-data}"
+image="${FUTU_IMAGE:-ghcr.io/lqepoch/futu_api_docker:latest}"
+env_file="${FUTU_ENV_FILE:-/etc/futu-opend/futu.env}"
+
+get_env() {
+  local key="$1"
+  grep -E "^${key}=" "$env_file" | tail -n 1 | cut -d= -f2-
+}
+
 case "${1:-}" in
   status)
     docker ps --filter "name=^/${container}$"
@@ -128,28 +158,41 @@ case "${1:-}" in
   request-code)
     exec docker exec "$container" futu-verify request-phone
     ;;
+  verify-pic)
+    [[ -n "${2:-}" ]] || { echo "Usage: futu-opendctl verify-pic <CODE>" >&2; exit 2; }
+    exec docker exec "$container" futu-verify pic "$2"
+    ;;
+  request-pic)
+    exec docker exec "$container" futu-verify request-pic
+    ;;
   api-key)
     exec docker exec "$container" futu-verify show-api-key
     ;;
   ws-key)
     exec docker exec "$container" futu-verify show-ws-key
     ;;
+  ws-cert)
+    exec docker exec "$container" futu-verify show-ws-cert
+    ;;
   restart)
     exec docker restart "$container"
     ;;
   update)
-    image="${FUTU_IMAGE:-ghcr.io/lqepoch/futu_api_docker:latest}"
-    env_file="${FUTU_ENV_FILE:-/etc/futu-opend/futu.env}"
-    api_port="$(grep -E '^FUTU_API_PORT=' "$env_file" | cut -d= -f2-)"
-    ws_port="$(grep -E '^FUTU_WEBSOCKET_PORT=' "$env_file" | cut -d= -f2-)"
-    api_publish="$(grep -E '^FUTU_API_PUBLISH_ADDRESS=' "$env_file" | cut -d= -f2-)"
-    ws_publish="$(grep -E '^FUTU_WEBSOCKET_PUBLISH_ADDRESS=' "$env_file" | cut -d= -f2-)"
+    api_port="$(get_env FUTU_API_PORT)"
+    ws_port="$(get_env FUTU_WEBSOCKET_PORT)"
+    api_publish="$(get_env FUTU_API_PUBLISH_ADDRESS)"
+    ws_publish="$(get_env FUTU_WEBSOCKET_PUBLISH_ADDRESS)"
     docker pull "$image"
     docker rm -f "$container" >/dev/null 2>&1 || true
-    exec docker run -d --name "$container" --restart unless-stopped --init       --env-file "$env_file"       -v futu-opend-data:/home/futu/.com.futunn.FutuOpenD       -p "$api_publish:$api_port:$api_port/tcp"       -p "$ws_publish:$ws_port:$ws_port/tcp"       --security-opt no-new-privileges:true --cap-drop ALL "$image"
+    exec docker run -d --name "$container" --restart unless-stopped --init \
+      --env-file "$env_file" \
+      -v "$volume:/home/futu/.com.futunn.FutuOpenD" \
+      -p "$api_publish:$api_port:$api_port/tcp" \
+      -p "$ws_publish:$ws_port:$ws_port/tcp" \
+      --security-opt no-new-privileges:true --cap-drop ALL "$image"
     ;;
   *)
-    echo "Usage: futu-opendctl {status|logs|verify <code>|request-code|api-key|ws-key|restart|update}" >&2
+    echo "Usage: futu-opendctl {status|logs|verify <code>|request-code|verify-pic <code>|request-pic|api-key|ws-key|ws-cert|restart|update}" >&2
     exit 2
     ;;
 esac
@@ -157,14 +200,19 @@ CTL
 chmod 0755 /usr/local/bin/futu-opendctl
 
 echo
-echo "Futu OpenD container started from: $IMAGE"
-echo "Runtime env: $ENV_FILE"
-echo "API: $API_PUBLISH:$API_PORT"
-echo "WSS: $WS_PUBLISH:$WS_PORT"
+echo "Futu OpenD is running from the prebuilt image: $IMAGE"
+echo "Runtime env file: $ENV_FILE (mode 0600)"
+echo "API endpoint: $API_PUBLISH:$API_PORT"
+echo "WSS endpoint: $WS_PUBLISH:$WS_PORT"
 echo
-echo "Watch login:   sudo futu-opendctl logs"
-echo "If an SMS arrives, submit only that code:"
-echo "               sudo futu-opendctl verify 123456"
-echo "Status:        sudo futu-opendctl status"
-echo "WebSocket key: sudo futu-opendctl ws-key"
-echo "API RSA key:   sudo futu-opendctl api-key"
+echo "Normal next step:"
+echo "  sudo futu-opendctl logs"
+echo
+echo "If Futu sends an SMS, wait for the message and then run exactly one command:"
+echo "  sudo futu-opendctl verify 123456"
+echo
+echo "Useful commands:"
+echo "  sudo futu-opendctl status"
+echo "  sudo futu-opendctl ws-key"
+echo "  sudo futu-opendctl api-key"
+echo "  sudo futu-opendctl update"
