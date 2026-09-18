@@ -7,10 +7,13 @@ FROM ubuntu:24.04 AS downloader
 ARG FUTU_OPEND_DOWNLOAD_URL
 ARG FUTU_OPEND_ARCHIVE_SHA256
 ENV DEBIAN_FRONTEND=noninteractive
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /tmp
+
 RUN set -eux; \
     effective_url="$(curl --fail --location --show-error --silent \
       --retry 5 --retry-delay 2 --retry-all-errors \
@@ -33,35 +36,43 @@ RUN set -eux; \
 
 FROM ubuntu:24.04 AS runtime
 ARG FUTU_OPEND_VERSION="unknown"
+
 LABEL org.opencontainers.image.source="https://github.com/lqepoch/futu_api_docker" \
       org.opencontainers.image.title="Futu OpenD on Ubuntu 24.04" \
-      org.opencontainers.image.description="Ready-to-run Futu OpenD with automated interactive login, persistent device state, API RSA and WSS" \
+      org.opencontainers.image.description="Futu OpenD with native interactive login, persistent state, API RSA and WSS" \
       org.opencontainers.image.version="${FUTU_OPEND_VERSION}" \
       org.opencontainers.image.licenses="Apache-2.0"
+
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=Asia/Hong_Kong \
-    HOME=/home/futu
+    HOME=/home/futu \
+    FUTU_API_IP=0.0.0.0 \
+    FUTU_API_PORT=11111 \
+    FUTU_TELNET_IP=127.0.0.1 \
+    FUTU_TELNET_PORT=22222 \
+    FUTU_WEBSOCKET_IP=0.0.0.0 \
+    FUTU_WEBSOCKET_PORT=33333
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       ca-certificates expect netcat-openbsd openssl procps tzdata \
+       ca-certificates netcat-openbsd openssl tzdata \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 --shell /bin/bash futu \
-    && install -d -o futu -g futu -m 0700 \
-       /home/futu/.com.futunn.FutuOpenD \
-       /run/futu /run/futu-secrets
+    && install -d -o futu -g futu -m 0700 /home/futu/.com.futunn.FutuOpenD
+
 COPY --from=downloader --chown=futu:futu /opt/futu-opend /opt/futu-opend
 COPY --chmod=0755 scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-COPY --chmod=0755 scripts/futu-opend-cli /usr/local/bin/futu-opend-cli
-COPY --chmod=0755 scripts/futu-auto-login.exp /usr/local/bin/futu-auto-login
-COPY --chmod=0755 scripts/futu-auto-request-phone-code.sh /usr/local/bin/futu-auto-request-phone-code
-COPY --chmod=0755 scripts/futu-verify /usr/local/bin/futu-verify
+
 RUN ldd /opt/futu-opend/FutuOpenD | tee /tmp/futu-ldd.txt \
     && ! grep -q 'not found' /tmp/futu-ldd.txt
+
 USER futu:futu
 WORKDIR /opt/futu-opend
+
 VOLUME ["/home/futu/.com.futunn.FutuOpenD"]
 EXPOSE 11111 33333
-HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=5 \
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=180s --retries=5 \
   CMD nc -z -w 3 127.0.0.1 "${FUTU_API_PORT:-11111}" || exit 1
+
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-CMD ["serve"]
