@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+secrets/*
+!secrets/.gitkeep
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
