@@ -16,7 +16,9 @@ EOF
   exit 2
 }
 
+state="/home/futu/.com.futunn.FutuOpenD/docker-secrets"
 cmd="${1:-}"
+
 case "$cmd" in
   phone)
     code="${2:-}"
@@ -38,13 +40,31 @@ case "$cmd" in
     exec futu-opend-cli ping
     ;;
   show-api-key)
-    exec cat /home/futu/.com.futunn.FutuOpenD/docker-secrets/api-rsa.pem
+    if [[ -n "${FUTU_API_RSA_PRIVATE_KEY_B64:-}" ]]; then
+      printf '%s' "$FUTU_API_RSA_PRIVATE_KEY_B64" | base64 --decode
+    elif [[ -n "${FUTU_API_RSA_PRIVATE_KEY_FILE:-}" && -r "$FUTU_API_RSA_PRIVATE_KEY_FILE" ]]; then
+      cat "$FUTU_API_RSA_PRIVATE_KEY_FILE"
+    else
+      cat "$state/api-rsa.pem"
+    fi
     ;;
   show-ws-key)
-    exec cat /home/futu/.com.futunn.FutuOpenD/docker-secrets/websocket-auth-key
+    if [[ -n "${FUTU_WEBSOCKET_AUTH_KEY:-}" ]]; then
+      printf '%s\n' "$FUTU_WEBSOCKET_AUTH_KEY"
+    elif [[ -n "${FUTU_WEBSOCKET_AUTH_KEY_FILE:-}" && -r "$FUTU_WEBSOCKET_AUTH_KEY_FILE" ]]; then
+      cat "$FUTU_WEBSOCKET_AUTH_KEY_FILE"
+    else
+      cat "$state/websocket-auth-key"
+    fi
     ;;
   show-ws-cert)
-    exec cat /home/futu/.com.futunn.FutuOpenD/docker-secrets/websocket.crt
+    if [[ -n "${FUTU_WEBSOCKET_CERT_B64:-}" ]]; then
+      printf '%s' "$FUTU_WEBSOCKET_CERT_B64" | base64 --decode
+    elif [[ -n "${FUTU_WEBSOCKET_CERT_FILE:-}" && -r "$FUTU_WEBSOCKET_CERT_FILE" ]]; then
+      cat "$FUTU_WEBSOCKET_CERT_FILE"
+    else
+      cat "$state/websocket.crt"
+    fi
     ;;
   *)
     usage
