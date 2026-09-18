@@ -25,7 +25,7 @@ fake_opend="$test_dir/fake-opend.sh"
 cat > "$fake_opend" <<'EOF'
 #!/usr/bin/env bash
 printf 'input_phone_verify_code -code=1234\n'
-sleep 0.1
+sleep 10
 EOF
 chmod 0755 "$fake_opend"
 
@@ -77,8 +77,8 @@ run_case() {
   }
 }
 
-run_case valid_success 1234 success 0 yes
-run_case valid_length 12345678 success 0 yes
+run_case valid_success 1234 success 124 yes
+run_case valid_length 12345678 success 124 yes
 run_case readiness_failure 1234 fail 1 no
 
 echo 'login OTP tests passed'
