@@ -1,305 +1,333 @@
-# futu_api_docker
+# Futu OpenD Docker（Ubuntu 24.04）
 
-Ready-to-run **Futu OpenD** Docker image for Ubuntu 24.04.
+这是一个尽量精简的 Futu OpenD Docker 镜像。
 
-Published image:
+镜像：
 
-```text
+~~~text
 ghcr.io/lqepoch/futu_api_docker:latest
-ghcr.io/lqepoch/futu_api_docker:<OpenD-version>
-```
+ghcr.io/lqepoch/futu_api_docker:<OpenD版本>
+~~~
 
-The image already contains the official Futu OpenD Ubuntu package. **Deployment hosts do not build the image and do not need to clone this repository.** Runtime settings are supplied with Docker environment variables / `--env-file`.
+核心原则：
 
-## Fastest deployment
+- Docker 只负责安装并运行官方 Futu OpenD。
+- 账号、登录密码、验证码全部走 OpenD 自己的登录流程。
+- 不在环境变量里保存富途登录密码。
+- 不使用 expect 自动代输账号密码。
+- 不维护自定义验证码状态机。
+- OpenD 设备状态持久化到 Docker Volume。
+- 跨机器 WebSocket 默认启用 WSS/SSL。
+- 远程 API 所需的 RSA 私钥自动生成并持久化。
+- GitHub Actions 每天检查官方 OpenD 新版本并自动重新构建镜像。
 
-On an Ubuntu 24.04 cloud server:
+## 1. 拉取镜像
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/lqepoch/futu_api_docker/main/install.sh \
-  -o /tmp/futu-opend-install.sh \
-  && sudo bash /tmp/futu-opend-install.sh
-```
-
-The installer asks only for:
-
-1. Futu account / email / phone
-2. Futu login password
-
-It then automatically:
-
-- installs Docker if it is missing;
-- pulls `ghcr.io/lqepoch/futu_api_docker:latest`;
-- creates a persistent OpenD state volume;
-- writes a root-only runtime env file at `/etc/futu-opend/futu.env`;
-- generates an API RSA key when none is supplied;
-- generates a persistent WebSocket authentication key when none is supplied;
-- generates a persistent self-signed WSS certificate when none is supplied;
-- starts the container;
-- drives OpenD's interactive account/password login automatically;
-- requests a phone verification code once on the first unverified device login.
-
-OpenD 10.10+ uses interactive account/password login. The container automates that interactive step instead of writing obsolete login-password fields into `FutuOpenD.xml`.
-
-### If Futu sends an SMS code
-
-Wait until the SMS actually arrives, then run:
-
-```bash
-sudo futu-opendctl verify 123456
-```
-
-Replace `123456` with the received code.
-
-The request and submission are intentionally separate. Futu limits phone-code requests to one per 60 seconds.
-
-Then check:
-
-```bash
-sudo futu-opendctl status
-sudo futu-opendctl logs
-```
-
-## Runtime ports
-
-| Service | Default |
-| --- | --- |
-| Futu API TCP | container `11111`, host `127.0.0.1:11111` |
-| WebSocket/WSS | container `33333`, host `0.0.0.0:33333` |
-| OpenD operation/Telnet | container-local `127.0.0.1:22222`, never published by default |
-
-Keeping the Futu API bound to host loopback is the safer default when your trading bot runs on the same machine.
-
-## Runtime environment variables
-
-`.env.example` is a **runtime environment template**. It is not a Docker build configuration.
-
-Minimum direct Docker deployment:
-
-```dotenv
-FUTU_LOGIN_ACCOUNT=your-account
-FUTU_LOGIN_PASSWORD_B64=<base64-of-login-password>
-
-FUTU_API_IP=0.0.0.0
-FUTU_API_PORT=11111
-FUTU_API_PUBLISH_ADDRESS=127.0.0.1
-
-FUTU_WEBSOCKET_ENABLED=true
-FUTU_WEBSOCKET_IP=0.0.0.0
-FUTU_WEBSOCKET_PORT=33333
-FUTU_WEBSOCKET_PUBLISH_ADDRESS=0.0.0.0
-```
-
-You may use `FUTU_LOGIN_PASSWORD` directly, but `FUTU_LOGIN_PASSWORD_B64` avoids quoting problems in Docker env files. Base64 is encoding, not encryption; protect the env file with mode `0600`.
-
-Optional overrides:
-
-```dotenv
-# phone-number account
-FUTU_AREA_CODE=+86
-
-# fixed WebSocket authentication key
-FUTU_WEBSOCKET_AUTH_KEY=replace-with-your-own-secret
-
-# existing API RSA PKCS#1 private key
-FUTU_API_RSA_PRIVATE_KEY_B64=<base64>
-
-# existing CA-signed WSS certificate and unencrypted private key
-FUTU_WEBSOCKET_CERT_B64=<base64>
-FUTU_WEBSOCKET_PRIVATE_KEY_B64=<base64>
-FUTU_WEBSOCKET_TLS_CN=opend.example.com
-```
-
-If the RSA key, WSS cert/key, or WebSocket auth key are omitted, the container creates persistent values in the OpenD state volume.
-
-## Direct `docker run` without installer
-
-Create an env file:
-
-```bash
-sudo install -d -m 700 /etc/futu-opend
-sudo nano /etc/futu-opend/futu.env
-sudo chmod 600 /etc/futu-opend/futu.env
-```
-
-Example:
-
-```dotenv
-FUTU_LOGIN_ACCOUNT=10000000
-FUTU_LOGIN_PASSWORD_B64=BASE64_PASSWORD
-FUTU_API_IP=0.0.0.0
-FUTU_API_PORT=11111
-FUTU_API_PUBLISH_ADDRESS=127.0.0.1
-FUTU_WEBSOCKET_ENABLED=true
-FUTU_WEBSOCKET_IP=0.0.0.0
-FUTU_WEBSOCKET_PORT=33333
-FUTU_WEBSOCKET_PUBLISH_ADDRESS=0.0.0.0
-FUTU_AUTO_REQUEST_PHONE_CODE=true
-FUTU_PHONE_CODE_REQUEST_DELAY_SECONDS=8
-FUTU_LANG=en
-FUTU_LOG_LEVEL=info
-```
-
-Run the already-built image:
-
-```bash
-docker volume create futu-opend-data
-
+~~~bash
 docker pull ghcr.io/lqepoch/futu_api_docker:latest
+~~~
 
-docker run -d \
+创建持久化 Volume：
+
+~~~bash
+docker volume create futu-opend-data
+~~~
+
+## 2. 首次启动
+
+~~~bash
+docker run -it \
   --name futu-opend \
   --restart unless-stopped \
-  --init \
-  --env-file /etc/futu-opend/futu.env \
+  -p 127.0.0.1:11111:11111 \
+  -p 33333:33333 \
   -v futu-opend-data:/home/futu/.com.futunn.FutuOpenD \
-  -p 127.0.0.1:11111:11111/tcp \
-  -p 0.0.0.0:33333:33333/tcp \
-  --security-opt no-new-privileges:true \
-  --cap-drop ALL \
   ghcr.io/lqepoch/futu_api_docker:latest
-```
+~~~
 
-No `docker build` is involved.
+启动后直接进入 Futu OpenD 原生交互流程。
 
-## Verification and operations
+按照屏幕提示输入：
 
-Phone verification:
+1. 富途账号 / 手机号 / 邮箱
+2. 登录密码
+3. 是否记住密码
+4. 如触发设备锁验证，再完成手机验证码验证
 
-```bash
-docker exec futu-opend futu-verify phone 123456
-```
+登录成功后，不要用 Ctrl+C 退出。
 
-Request another phone code manually only when needed:
+使用：
 
-```bash
-docker exec futu-opend futu-verify request-phone
-```
+~~~text
+Ctrl+P
+Ctrl+Q
+~~~
 
-Picture verification, if Futu requires it:
+即可从容器终端 detach，OpenD 会继续在后台运行。
 
-```bash
-docker exec futu-opend futu-verify request-pic
-docker exec futu-opend futu-verify pic ABCD
-```
+以后重新进入 OpenD 控制台：
 
-OpenD ping:
+~~~bash
+docker attach futu-opend
+~~~
 
-```bash
-docker exec futu-opend futu-verify ping
-```
+查看日志：
 
-## Keys and certificates
+~~~bash
+docker logs -f futu-opend
+~~~
 
-Show the active WebSocket authentication key:
+## 3. 手机验证码
 
-```bash
-sudo futu-opendctl ws-key
-```
+Futu 官方的手机验证码验证通过 OpenD 运维命令完成。
 
-Export the API RSA private key for a client that must use Futu protocol encryption:
+如果首次登录提示需要手机验证码，在另一个终端执行：
 
-```bash
-sudo futu-opendctl api-key > futu-api-rsa.pem
-chmod 600 futu-api-rsa.pem
-```
+~~~bash
+docker exec -it futu-opend nc 127.0.0.1 22222
+~~~
 
-Export the generated WSS certificate:
+请求验证码：
 
-```bash
-sudo futu-opendctl ws-cert > futu-opend.crt
-```
+~~~text
+req_phone_verify_code
+~~~
 
-The default WSS certificate is self-signed. For Internet/browser clients, supply a certificate issued for the actual DNS name through `FUTU_WEBSOCKET_CERT_B64` and `FUTU_WEBSOCKET_PRIVATE_KEY_B64`.
+等短信真正收到以后，再输入：
 
-## Persistent login/device state
+~~~text
+input_phone_verify_code -code=123456
+~~~
 
-The Docker volume is mounted at:
+把 123456 换成实际收到的验证码。
 
-```text
+请求验证码和提交验证码是两个独立动作，不做自动延时提交。
+
+Futu 官方限制手机验证码请求频率为每 60 秒最多 1 次。
+
+## 4. 跨机器 WebSocket / WSS
+
+默认配置：
+
+~~~text
+WebSocket 监听地址：0.0.0.0
+WebSocket 端口：33333
+SSL：开启
+WebSocket 鉴权：开启
+~~~
+
+Futu OpenD 在 WebSocket 监听非本地地址时需要 SSL。
+
+容器首次启动会自动创建并持久化：
+
+~~~text
+/home/futu/.com.futunn.FutuOpenD/docker-security/wss/server.crt
+/home/futu/.com.futunn.FutuOpenD/docker-security/wss/server.key
+/home/futu/.com.futunn.FutuOpenD/docker-security/wss/auth.key
+~~~
+
+其中：
+
+- server.crt：WSS 证书
+- server.key：无密码私钥
+- auth.key：WebSocket 原始鉴权密钥
+- OpenD 配置文件里写入的是 auth.key 的 32 位 MD5
+
+查看 WebSocket 鉴权密钥：
+
+~~~bash
+docker exec futu-opend \
+  cat /home/futu/.com.futunn.FutuOpenD/docker-security/wss/auth.key
+~~~
+
+### 默认自签证书
+
+没有提供外部证书时，容器自动生成自签证书。
+
+这足以让 OpenD 的跨机器 WebSocket 以 WSS 模式启动。
+
+如果远程客户端严格校验证书主机名，需要让证书 SAN 包含实际服务器域名或 IP。
+
+首次创建一个全新的 Volume 时，可以指定：
+
+~~~bash
+docker run -it \
+  --name futu-opend \
+  --restart unless-stopped \
+  -p 127.0.0.1:11111:11111 \
+  -p 33333:33333 \
+  -e FUTU_WEBSOCKET_TLS_CN=opend.example.com \
+  -e FUTU_WEBSOCKET_TLS_SAN=DNS:opend.example.com \
+  -v futu-opend-data:/home/futu/.com.futunn.FutuOpenD \
+  ghcr.io/lqepoch/futu_api_docker:latest
+~~~
+
+如果使用服务器 IP：
+
+~~~bash
+-e FUTU_WEBSOCKET_TLS_CN=203.0.113.10 \
+-e FUTU_WEBSOCKET_TLS_SAN=IP:203.0.113.10
+~~~
+
+### 使用正式证书
+
+互联网环境、浏览器或需要完整证书校验的客户端，可以直接挂载已有证书：
+
+~~~bash
+docker run -it \
+  --name futu-opend \
+  --restart unless-stopped \
+  -p 127.0.0.1:11111:11111 \
+  -p 33333:33333 \
+  -v futu-opend-data:/home/futu/.com.futunn.FutuOpenD \
+  -v /path/server.crt:/run/futu/server.crt:ro \
+  -v /path/server.key:/run/futu/server.key:ro \
+  -e FUTU_WEBSOCKET_CERT_FILE=/run/futu/server.crt \
+  -e FUTU_WEBSOCKET_PRIVATE_KEY_FILE=/run/futu/server.key \
+  -e FUTU_WEBSOCKET_AUTH_KEY='你的WebSocket鉴权密钥' \
+  ghcr.io/lqepoch/futu_api_docker:latest
+~~~
+
+证书和私钥必须同时配置，私钥不能设置密码。
+
+## 5. API TCP 与 RSA 加密
+
+OpenD API 默认监听容器端口：
+
+~~~text
+11111
+~~~
+
+示例命令仅把它映射到宿主机：
+
+~~~text
+127.0.0.1:11111
+~~~
+
+适合自动交易机器人和 OpenD 在同一台服务器的部署方式。
+
+容器首次启动还会生成持久化的 PKCS#1 1024-bit RSA 私钥：
+
+~~~text
+/home/futu/.com.futunn.FutuOpenD/docker-security/api-rsa.pem
+~~~
+
+远程机器连接 OpenD 并使用交易接口时，需要按 Futu API 的协议加密规则配置同一份私钥。
+
+导出：
+
+~~~bash
+docker cp \
+  futu-opend:/home/futu/.com.futunn.FutuOpenD/docker-security/api-rsa.pem \
+  ./futu-api-rsa.pem
+
+chmod 600 ./futu-api-rsa.pem
+~~~
+
+如果确实需要让另一台机器直连 TCP 11111，可以把端口映射改成：
+
+~~~bash
+-p 11111:11111
+~~~
+
+同时用云安全组或防火墙只允许指定策略服务器访问。
+
+## 6. 持久化
+
+Docker Volume：
+
+~~~text
+futu-opend-data
+~~~
+
+挂载位置：
+
+~~~text
 /home/futu/.com.futunn.FutuOpenD
-```
+~~~
 
-That preserves Futu's device identity, including `F3CNN/Device.dat`. Deleting or corrupting that device file can trigger device-lock verification again. Do not copy the same OpenD state volume to multiple simultaneously running hosts.
+这里会保存：
 
-The container submits the real login password at startup through OpenD's interactive login flow. It does not depend on `login_by_remember=1` for routine long-running operation.
+- Futu OpenD 设备身份
+- Device.dat
+- 登录状态
+- WSS 证书和私钥
+- WebSocket 鉴权密钥
+- API RSA 私钥
 
-## Common control commands
+同一个 Volume 不要同时复制给多台正在运行的 OpenD 使用，否则可能触发设备锁重复验证。
 
-Installed by `install.sh`:
+## 7. 端口
 
-```bash
-sudo futu-opendctl status
-sudo futu-opendctl logs
-sudo futu-opendctl verify 123456
-sudo futu-opendctl request-code
-sudo futu-opendctl ws-key
-sudo futu-opendctl api-key
-sudo futu-opendctl restart
-sudo futu-opendctl update
-```
+| 服务 | 容器端口 | 默认宿主机暴露方式 |
+| --- | ---: | --- |
+| Futu API TCP | 11111 | 127.0.0.1:11111 |
+| WebSocket / WSS | 33333 | 0.0.0.0:33333 |
+| OpenD 运维端口 | 22222 | 仅容器内部 |
 
-`update` pulls the newest published GHCR image and recreates the container while retaining the state volume.
+22222 默认不发布到公网。
 
-## Network exposure
+## 8. 升级
 
-If the trading bot is on the same server, keep:
+拉取最新版：
 
-```dotenv
-FUTU_API_PUBLISH_ADDRESS=127.0.0.1
-```
+~~~bash
+docker pull ghcr.io/lqepoch/futu_api_docker:latest
+~~~
 
-If another host must connect to TCP 11111, change it to `0.0.0.0` and restrict the cloud security group/UFW rule to the strategy server's source IP.
+删除旧容器：
 
-The OpenD operation/Telnet port 22222 stays container-local. There is no reason to expose that unauthenticated operations surface publicly.
+~~~bash
+docker stop futu-opend
+docker rm futu-opend
+~~~
 
-## GitHub Actions: automatic OpenD updates
+然后重新执行上面的 docker run 命令，并继续挂载：
 
-Workflow:
+~~~text
+futu-opend-data
+~~~
 
-```text
+登录状态、设备状态、WSS 和 RSA 文件都会保留。
+
+## 9. GitHub Actions 自动更新
+
+工作流：
+
+~~~text
 .github/workflows/docker-publish.yml
-```
+~~~
 
-It runs:
+每天自动：
 
-- on relevant commits to `main`;
-- manually through `workflow_dispatch`;
-- every day at `02:23 UTC`.
+1. 获取 Futu 官方最新 Ubuntu OpenD 安装包。
+2. 解析真实 OpenD 版本号。
+3. 计算官方包 SHA-256。
+4. 与仓库 VERSION 和 UPSTREAM_SHA256 对比。
+5. 官方版本或文件发生变化时重新构建 Ubuntu 24.04 镜像。
+6. 发布：
+   - ghcr.io/lqepoch/futu_api_docker:latest
+   - ghcr.io/lqepoch/futu_api_docker:<OpenD版本>
+7. 生成 SBOM、provenance 和 attestation。
+8. 注销 GHCR 登录后重新匿名 pull，验证镜像确实可以公开拉取。
+9. 发布成功后更新 VERSION 和 UPSTREAM_SHA256。
 
-The scheduled job:
+部署服务器只需要 pull 和 run，不需要 clone 仓库，也不需要自己 build。
 
-1. downloads Futu's official latest Ubuntu OpenD archive;
-2. validates the tarball;
-3. derives the actual OpenD version from the package;
-4. computes SHA-256;
-5. compares version + SHA-256 against `VERSION` and `UPSTREAM_SHA256`;
-6. does nothing when both are unchanged;
-7. builds a new Ubuntu 24.04 image when upstream changed;
-8. re-verifies the exact upstream SHA-256 during Docker build;
-9. publishes:
-   - `ghcr.io/lqepoch/futu_api_docker:latest`
-   - `ghcr.io/lqepoch/futu_api_docker:<OpenD-version>`
-10. generates SBOM/provenance/attestation;
-11. records the successfully published upstream version and checksum back into the repository.
+## 10. 官方文档
 
-The Docker image is therefore built by GitHub Actions, not by deployment machines.
+Futu OpenD 命令行配置：
 
-## GHCR visibility
+https://openapi.futunn.com/futu-api-doc/opend/opend-cmd.html
 
-GitHub Container Registry creates new container packages as private by default. This workflow publishes with the repository `GITHUB_TOKEN` and includes:
+OpenD 运维命令：
 
-```text
-org.opencontainers.image.source=https://github.com/lqepoch/futu_api_docker
-```
+https://openapi.futunn.com/futu-api-doc/opend/opend-operate.html
 
-That links the package to this repository. After the first successful publish, set the container package visibility to **Public** once in GitHub package settings if the organization does not already enforce the desired visibility. Public GHCR packages can then be pulled anonymously.
+OpenD 常见问题：
 
-## Upstream behavior used by this image
+https://openapi.futunn.com/futu-api-doc/qa/opend.html
 
-- OpenD 10.10+ defaults to interactive login and asks for account, password, and whether to remember the password.
-- Phone-number login supports a country code.
-- Phone verification is handled with `req_phone_verify_code` and `input_phone_verify_code -code=...`.
-- Futu limits phone-code requests to one per 60 seconds and phone-code submissions to ten per 60 seconds.
-- A non-local WebSocket listener requires SSL; certificate and unencrypted private key must be configured together.
-- A non-local API listener requires protocol encryption for trading interfaces.
+API 协议加密：
+
+https://openapi.futunn.com/futu-api-doc/ftapi/protocol.html
