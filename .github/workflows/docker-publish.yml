@@ -6,15 +6,11 @@ on:
       - main
     paths:
       - "Dockerfile"
-      - "compose.yaml"
-      - ".env.example"
-      - "install.sh"
-      - "scripts/**"
+      - "scripts/docker-entrypoint.sh"
       - "VERSION"
       - "UPSTREAM_SHA256"
       - ".github/workflows/docker-publish.yml"
   schedule:
-    # 02:23 UTC = 10:23 UTC+8. Scheduled runs may start a little later.
     - cron: "23 2 * * *"
   workflow_dispatch:
     inputs:
@@ -61,7 +57,12 @@ jobs:
           listing="${RUNNER_TEMP}/FutuOpenD.list"
 
           effective_url="$(
-            curl --fail --location --show-error --silent               --retry 5 --retry-delay 2 --retry-all-errors               --user-agent 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome Safari'               --output "$archive"               --write-out '%{url_effective}'               "$FUTU_LATEST_ENDPOINT"
+            curl --fail --location --show-error --silent \
+              --retry 5 --retry-delay 2 --retry-all-errors \
+              --user-agent 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome Safari' \
+              --output "$archive" \
+              --write-out '%{url_effective}' \
+              "$FUTU_LATEST_ENDPOINT"
           )"
 
           tar -tzf "$archive" > "$listing"
@@ -109,26 +110,23 @@ jobs:
           {
             echo "### Futu OpenD upstream detection"
             echo ""
-            echo "- Current tracked version: \`$current_version\`"
-            echo "- Detected version: \`$version\`"
-            echo "- SHA-256: \`$sha256\`"
-            echo "- Changed: \`$changed\`"
-            echo "- Build this run: \`$should_build\`"
+            echo "- Current tracked version: $current_version"
+            echo "- Detected version: $version"
+            echo "- SHA-256: $sha256"
+            echo "- Changed: $changed"
+            echo "- Build this run: $should_build"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Validate repository scripts
+      - name: Validate repository
         if: steps.upstream.outputs.should_build == 'true'
         shell: bash
         run: |
           set -Eeuo pipefail
           bash -n scripts/docker-entrypoint.sh
-          bash -n scripts/futu-opend-cli
-          bash -n scripts/futu-auto-request-phone-code.sh
-          bash -n scripts/futu-verify
-          bash -n install.sh
-          cp .env.example .env
-          trap 'rm -f .env' EXIT
-          docker compose -f compose.yaml config >/dev/null
+          grep -q 'FROM ubuntu:24.04' Dockerfile
+          grep -q 'websocket_private_key' scripts/docker-entrypoint.sh
+          grep -q 'websocket_cert' scripts/docker-entrypoint.sh
+          grep -q 'rsa_private_key' scripts/docker-entrypoint.sh
 
       - name: Set up Docker Buildx
         if: steps.upstream.outputs.should_build == 'true'
@@ -184,9 +182,12 @@ jobs:
           set -Eeuo pipefail
           docker logout "${REGISTRY}" >/dev/null 2>&1 || true
           rm -f "${HOME}/.docker/config.json" || true
-          docker pull "${REGISTRY}/${IMAGE_NAME}:${{ steps.upstream.outputs.version }}"
-          docker image inspect "${REGISTRY}/${IMAGE_NAME}:${{ steps.upstream.outputs.version }}" >/dev/null
-          echo "Anonymous GHCR pull succeeded." >> "$GITHUB_STEP_SUMMARY"
+          image="${REGISTRY}/${IMAGE_NAME}:${{ steps.upstream.outputs.version }}"
+          docker pull "$image"
+          docker image inspect "$image" >/dev/null
+          docker run --rm --entrypoint /bin/bash "$image" -lc \
+            'test -x /opt/futu-opend/FutuOpenD && test -x /usr/local/bin/docker-entrypoint.sh'
+          echo "Anonymous GHCR pull and image smoke test succeeded." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Record successfully published upstream version
         if: steps.upstream.outputs.should_build == 'true' && success()
