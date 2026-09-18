@@ -1,22 +1,21 @@
 services:
   futu-opend:
-    image: ${FUTU_IMAGE:-ghcr.io/lqepoch/futu_api_docker:latest}
+    image: ghcr.io/lqepoch/futu_api_docker:latest
     container_name: futu-opend
     restart: unless-stopped
     init: true
     env_file:
       - .env
     ports:
-      - "${FUTU_API_BIND_ADDRESS:-127.0.0.1}:${FUTU_API_HOST_PORT:-11111}:${FUTU_API_PORT:-11111}/tcp"
-      - "${FUTU_WEBSOCKET_BIND_ADDRESS:-0.0.0.0}:${FUTU_WEBSOCKET_HOST_PORT:-33333}:${FUTU_WEBSOCKET_PORT:-33333}/tcp"
+      - "${FUTU_API_PUBLISH_ADDRESS:-127.0.0.1}:${FUTU_API_PORT:-11111}:${FUTU_API_PORT:-11111}/tcp"
+      - "${FUTU_WEBSOCKET_PUBLISH_ADDRESS:-0.0.0.0}:${FUTU_WEBSOCKET_PORT:-33333}:${FUTU_WEBSOCKET_PORT:-33333}/tcp"
     volumes:
       - futu-state:/home/futu/.com.futunn.FutuOpenD
-      - ./secrets:/run/user-secrets:ro
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    stop_grace_period: 30s
+    stop_grace_period: 20s
 
 volumes:
   futu-state:
