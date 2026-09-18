@@ -57,17 +57,18 @@ jobs:
           set -Eeuo pipefail
 
           archive="${RUNNER_TEMP}/FutuOpenD.tar.gz"
+          listing="${RUNNER_TEMP}/FutuOpenD.list"
+
           effective_url="$(
             curl --fail --location --show-error --silent               --retry 5 --retry-delay 2 --retry-all-errors               --user-agent 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome Safari'               --output "$archive"               --write-out '%{url_effective}'               "$FUTU_LATEST_ENDPOINT"
           )"
 
-          tar -tzf "$archive" >/dev/null
+          tar -tzf "$archive" > "$listing"
+          package_name="$(grep -m 1 -oE 'Futu_OpenD_[0-9]+\.[0-9]+\.[0-9]+_Ubuntu18\.04' "$listing" || true)"
+          version="${package_name#Futu_OpenD_}"
+          version="${version%_Ubuntu18.04}"
 
-          version="$(
-            tar -tzf "$archive"               | grep -oE 'Futu_OpenD_[0-9]+\.[0-9]+\.[0-9]+_Ubuntu18\.04'               | head -n 1               | sed -E 's/^Futu_OpenD_([0-9]+\.[0-9]+\.[0-9]+)_Ubuntu18\.04$/\1/'
-          )"
-
-          if [[ -z "$version" ]]; then
+          if [[ -z "$package_name" || -z "$version" || "$version" == "$package_name" ]]; then
             echo "::error::Unable to determine Futu OpenD version from the official Ubuntu archive"
             exit 1
           fi
