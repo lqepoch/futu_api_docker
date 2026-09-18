@@ -7,6 +7,8 @@ on:
     paths:
       - "Dockerfile"
       - "scripts/docker-entrypoint.sh"
+      - "scripts/futu-opend-direct-otp.expect"
+      - "README.md"
       - "VERSION"
       - "UPSTREAM_SHA256"
       - ".github/workflows/docker-publish.yml"
@@ -130,6 +132,8 @@ jobs:
           grep -q 'expect' Dockerfile
           grep -q 'FUTU_LOGIN_DIRECT_OTP' scripts/docker-entrypoint.sh
           grep -q 'set child_tty \$spawn_out(slave,name)' scripts/futu-opend-direct-otp.expect
+          grep -q 'wait_for_attached_terminal' scripts/futu-opend-direct-otp.expect
+          grep -q '登录提示' scripts/futu-opend-direct-otp.expect
           grep -q -- '-input \$user_spawn_id -output \$spawn_id' scripts/futu-opend-direct-otp.expect
           grep -q 'send -raw -i \$spawn_id' scripts/futu-opend-direct-otp.expect
           ! grep -q 'read -r FUTU_LOGIN_ACCOUNT </dev/tty' scripts/docker-entrypoint.sh

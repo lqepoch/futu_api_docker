@@ -50,14 +50,39 @@ proc submit_phone_code {code host port} {
     return 0
 }
 
+proc user_terminal_size {} {
+    if {[catch {set output [string trim [exec stty size]]}]} {
+        return {}
+    }
+    if {![regexp {^([0-9]+)[[:space:]]+([0-9]+)$} $output -> rows columns]
+        || $rows <= 0 || $columns <= 0} {
+        return {}
+    }
+    return [list $rows $columns]
+}
+
+proc wait_for_attached_terminal {} {
+    # A detached `docker run -d -it` still gives Expect a pty, but Docker
+    # reports a 0x0 window until the first `docker attach` supplies its size.
+    # Wait before starting OpenD so this prompt is visible in that attach
+    # session instead of being emitted into an unseen pty buffer.
+    if {[catch {fconfigure stdin -mode}]} {
+        return
+    }
+    while {1} {
+        if {[llength [user_terminal_size]] == 2} {
+            return
+        }
+        after 250
+    }
+}
+
 proc copy_user_terminal_size_to_child {child_tty} {
     # Expect allocates a fresh pty for OpenD. Without copying the attached
     # terminal dimensions, that pty reports 0x0 to OpenD; its native console
     # then consumes account/password input as empty lines. Write explicitly to
     # the spawned OpenD pty so foreground and attach-after-start both work.
-    if {[catch {set size [split [exec stty size] " "]}]} {
-        return 0
-    }
+    set size [user_terminal_size]
     if {[llength $size] != 2} {
         return 0
     }
@@ -87,6 +112,8 @@ catch {set telnet_port $env(FUTU_TELNET_PORT)}
 trap {restore_user_terminal; exit 130} SIGINT
 trap {restore_user_terminal; exit 143} SIGTERM
 
+wait_for_attached_terminal
+send_user "\n\[futu-docker\] 登录提示：请输入富途账号、手机号或邮箱（手机号默认 +86）。\n"
 spawn -noecho {*}$argv
 set child_tty $spawn_out(slave,name)
 copy_user_terminal_size_to_child $child_tty

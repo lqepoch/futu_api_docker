@@ -45,7 +45,11 @@ docker run -it \
   ghcr.io/lqepoch/futu_api_docker:latest
 ~~~
 
-启动后直接进入 Futu OpenD 原生交互流程。
+启动后先显示容器登录提示，然后进入 Futu OpenD 原生交互流程：
+
+~~~text
+[futu-docker] 登录提示：请输入富途账号、手机号或邮箱（手机号默认 +86）。
+~~~
 
 按照屏幕提示输入：
 
@@ -83,8 +87,10 @@ Ctrl+Q
 docker attach futu-opend
 ~~~
 
-如果容器是用 `-d -it` 后台启动，再执行 `docker attach` 也可以正常输入；桥接层会在首次
-按键时同步 attach 终端尺寸到 OpenD，不会把账号或密码当成空输入。
+如果容器是用 `-d -it` 后台启动，桥接层会等待第一次 `docker attach`，然后在当前终端显示
+上面的登录提示并启动 OpenD 原生流程；这样启动期间的提示不会丢失。attach 后桥接层会同步
+终端尺寸到 OpenD，不会把账号或密码当成空输入。登录后使用 Ctrl-P、Ctrl-Q 可以让容器继续
+在后台运行。
 
 查看日志：
 
