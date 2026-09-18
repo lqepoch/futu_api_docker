@@ -1,0 +1,47 @@
+#!/usr/bin/expect -f
+
+set timeout_value 300
+if {[info exists env(FUTU_LOGIN_AUTO_ATTACH_TIMEOUT)]} {
+    set timeout_value $env(FUTU_LOGIN_AUTO_ATTACH_TIMEOUT)
+}
+if {![string is integer -strict $timeout_value] || $timeout_value <= 0} {
+    puts stderr "FUTU_LOGIN_AUTO_ATTACH_TIMEOUT must be a positive integer"
+    exit 64
+}
+if {$argc != 1} {
+    puts stderr "usage: futu-opend-auto-attach.expect container"
+    exit 64
+}
+
+set container [lindex $argv 0]
+set attach_spawn_id {}
+set detached 0
+set timeout $timeout_value
+log_user 0
+spawn docker attach $container
+set attach_spawn_id $spawn_id
+while {!$detached} {
+    expect {
+        -i $attach_spawn_id -re {FUTU_LOGIN_READY_MARKER} {
+            send_user -raw $expect_out(buffer)
+            send -raw -i $attach_spawn_id "\020\021"
+            set detached 1
+            break
+        }
+        -i $attach_spawn_id -re {(.|\n)+} {
+            send_user -raw $expect_out(buffer)
+        }
+        -i $attach_spawn_id eof { exit 1 }
+        -i $user_spawn_id -re {(.|\n)+} {
+            send -raw -i $attach_spawn_id $expect_out(buffer)
+        }
+        -i $user_spawn_id eof { exit 1 }
+        timeout {
+            puts stderr "timed out waiting for FUTU_LOGIN_READY_MARKER"
+            exit 124
+        }
+    }
+}
+if {!$detached} { exit 1 }
+set wait_result [wait]
+exit [lindex $wait_result 3]

@@ -134,6 +134,9 @@ fi
 cat >&2 <<EOF
 [futu-docker] OpenD 原生交互登录已启用
 [futu-docker] 手机验证码可在同一终端直接输入（可设置 FUTU_LOGIN_DIRECT_OTP=false 关闭）
+[futu-docker] 可选 FUTU_LOGIN_OTP_FILE：仅读取一次 4-8 位验证码并在提交后清理（路径不打印）
+[futu-docker] 登录成功后仅在 API 11111 与 WSS 33333 连续可用时输出 FUTU_LOGIN_READY_MARKER
+[futu-docker] 就绪检查超时可通过 FUTU_LOGIN_READY_TIMEOUT 设置（默认 60 秒）
 [futu-docker] API: ${FUTU_API_IP:-0.0.0.0}:${FUTU_API_PORT:-11111}
 [futu-docker] WSS: ${FUTU_WEBSOCKET_IP:-0.0.0.0}:${FUTU_WEBSOCKET_PORT:-33333}（SSL 已配置）
 [futu-docker] 持久化目录: $STATE_DIR
