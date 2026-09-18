@@ -61,6 +61,7 @@ RUN apt-get update \
     && install -d -o futu -g futu -m 0700 /home/futu/.com.futunn.FutuOpenD
 
 COPY --from=downloader --chown=futu:futu /opt/futu-opend /opt/futu-opend
+COPY --chmod=0644 scripts/login-identity.sh /usr/local/lib/futu-login-identity.sh
 COPY --chmod=0755 scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN ldd /opt/futu-opend/FutuOpenD | tee /tmp/futu-ldd.txt \
@@ -73,6 +74,7 @@ VOLUME ["/home/futu/.com.futunn.FutuOpenD"]
 EXPOSE 11111 33333
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=180s --retries=5 \
-  CMD nc -z -w 3 127.0.0.1 "${FUTU_API_PORT:-11111}" || exit 1
+  CMD nc -z -w 3 127.0.0.1 "${FUTU_API_PORT:-11111}" \
+    && nc -z -w 3 127.0.0.1 "${FUTU_WEBSOCKET_PORT:-33333}" || exit 1
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
