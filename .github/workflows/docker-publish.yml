@@ -1,0 +1,190 @@
+name: Build and publish Futu OpenD
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "Dockerfile"
+      - "compose.yaml"
+      - ".env.example"
+      - "scripts/**"
+      - "VERSION"
+      - "UPSTREAM_SHA256"
+      - ".github/workflows/docker-publish.yml"
+  schedule:
+    # 02:23 UTC = 10:23 UTC+8. Scheduled runs may start a little later.
+    - cron: "23 2 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Force a rebuild even if the upstream version and checksum are unchanged"
+        required: false
+        default: true
+        type: boolean
+
+concurrency:
+  group: futu-opend-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  packages: write
+  attestations: write
+  id-token: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  FUTU_LATEST_ENDPOINT: https://www.futunn.com/download/fetch-lasted-link?name=opend-ubuntu
+
+jobs:
+  publish:
+    name: Detect upstream and publish image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect official Ubuntu OpenD package
+        id: upstream
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          archive="${RUNNER_TEMP}/FutuOpenD.tar.gz"
+          effective_url="$(
+            curl --fail --location --show-error --silent               --retry 5 --retry-delay 2 --retry-all-errors               --user-agent 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome Safari'               --output "$archive"               --write-out '%{url_effective}'               "$FUTU_LATEST_ENDPOINT"
+          )"
+
+          tar -tzf "$archive" >/dev/null
+
+          version="$(
+            tar -tzf "$archive"               | grep -oE 'Futu_OpenD_[0-9]+\.[0-9]+\.[0-9]+_Ubuntu18\.04'               | head -n 1               | sed -E 's/^Futu_OpenD_([0-9]+\.[0-9]+\.[0-9]+)_Ubuntu18\.04$/\1/'
+          )"
+
+          if [[ -z "$version" ]]; then
+            echo "::error::Unable to determine Futu OpenD version from the official Ubuntu archive"
+            exit 1
+          fi
+
+          sha256="$(sha256sum "$archive" | awk '{print $1}')"
+          current_version="$(tr -d '\r\n' < VERSION 2>/dev/null || true)"
+          current_sha256="$(tr -d '\r\n' < UPSTREAM_SHA256 2>/dev/null || true)"
+
+          changed=false
+          if [[ "$version" != "$current_version" || "$sha256" != "$current_sha256" ]]; then
+            changed=true
+          fi
+
+          should_build=false
+          case "${{ github.event_name }}" in
+            schedule)
+              [[ "$changed" == "true" ]] && should_build=true
+              ;;
+            workflow_dispatch)
+              if [[ "${{ inputs.force }}" == "true" || "$changed" == "true" ]]; then
+                should_build=true
+              fi
+              ;;
+            push)
+              should_build=true
+              ;;
+          esac
+
+          {
+            echo "version=$version"
+            echo "sha256=$sha256"
+            echo "effective_url=$effective_url"
+            echo "changed=$changed"
+            echo "should_build=$should_build"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Futu OpenD upstream detection"
+            echo ""
+            echo "- Current tracked version: \`$current_version\`"
+            echo "- Detected version: \`$version\`"
+            echo "- SHA-256: \`$sha256\`"
+            echo "- Changed: \`$changed\`"
+            echo "- Build this run: \`$should_build\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Validate repository scripts
+        if: steps.upstream.outputs.should_build == 'true'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash -n scripts/docker-entrypoint.sh
+          bash -n scripts/futu-opend-cli
+          docker compose --env-file .env.example -f compose.yaml config >/dev/null
+
+      - name: Set up Docker Buildx
+        if: steps.upstream.outputs.should_build == 'true'
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        if: steps.upstream.outputs.should_build == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Ubuntu 24.04 image
+        id: build
+        if: steps.upstream.outputs.should_build == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          pull: true
+          provenance: mode=max
+          sbom: true
+          build-args: |
+            FUTU_OPEND_DOWNLOAD_URL=${{ steps.upstream.outputs.effective_url }}
+            FUTU_OPEND_ARCHIVE_SHA256=${{ steps.upstream.outputs.sha256 }}
+            FUTU_OPEND_VERSION=${{ steps.upstream.outputs.version }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.upstream.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.upstream.outputs.version }}
+            org.opencontainers.image.title=Futu OpenD on Ubuntu 24.04
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Generate image provenance attestation
+        if: steps.upstream.outputs.should_build == 'true'
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Record successfully published upstream version
+        if: steps.upstream.outputs.should_build == 'true' && success()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          printf '%s\n' '${{ steps.upstream.outputs.version }}' > VERSION
+          printf '%s\n' '${{ steps.upstream.outputs.sha256 }}' > UPSTREAM_SHA256
+
+          if git diff --quiet -- VERSION UPSTREAM_SHA256; then
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add VERSION UPSTREAM_SHA256
+          git commit -m "chore: track Futu OpenD ${{ steps.upstream.outputs.version }} [skip ci]"
+          git push origin HEAD:main
