@@ -14,39 +14,34 @@ if {$argc != 1} {
 }
 
 set container [lindex $argv 0]
+set attach_spawn_id {}
 set detached 0
 set timeout $timeout_value
 log_user 0
-
 spawn docker attach $container
-
-interact {
-    -input $user_spawn_id -output $spawn_id {
-        send -raw -i $spawn_id $interact_out(0,string)
-    }
-    -input $spawn_id -output $user_spawn_id {
-        -re {FUTU_LOGIN_READY_MARKER} {
-            send_user -raw $interact_out(0,string)
-            send -raw -i $spawn_id "\020\021"
+set attach_spawn_id $spawn_id
+while {!$detached} {
+    expect {
+        -i $attach_spawn_id -re {FUTU_LOGIN_READY_MARKER} {
+            send_user -raw $expect_out(buffer)
+            send -raw -i $attach_spawn_id "\020\021"
             set detached 1
-            return
+            break
         }
-        -re {(.|\n)+} {
-            send_user -raw $interact_out(0,string)
+        -i $attach_spawn_id -re {(.|\n)+} {
+            send_user -raw $expect_out(buffer)
         }
-    }
-    timeout {
-        puts stderr "timed out waiting for FUTU_LOGIN_READY_MARKER"
-        exit 124
-    }
-    eof {
-        exit 1
+        -i $attach_spawn_id eof { exit 1 }
+        -i $user_spawn_id -re {(.|\n)+} {
+            send -raw -i $attach_spawn_id $expect_out(buffer)
+        }
+        -i $user_spawn_id eof { exit 1 }
+        timeout {
+            puts stderr "timed out waiting for FUTU_LOGIN_READY_MARKER"
+            exit 124
+        }
     }
 }
-
-if {!$detached} {
-    exit 1
-}
-
+if {!$detached} { exit 1 }
 set wait_result [wait]
 exit [lindex $wait_result 3]
